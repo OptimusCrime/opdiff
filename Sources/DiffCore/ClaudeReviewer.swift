@@ -161,7 +161,7 @@ public enum QuestionPrompt {
     }
 }
 
-/// Runs a Claude Code command (e.g. `claude`, or an alias such as `pclaude`) through the
+/// Runs a Claude Code command (e.g. `claude`, or a shell alias for it) through the
 /// user's login shell, so aliases and PATH from their shell config work.
 public final class ClaudeReviewRun: @unchecked Sendable {
     private let command: String
@@ -198,7 +198,7 @@ public final class ClaudeReviewRun: @unchecked Sendable {
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
-        // -l: login profile (PATH), -i: interactive rc file (aliases such as `pclaude`).
+        // -l: login profile (PATH), -i: interactive rc file (shell aliases).
         process.arguments = ["-l", "-i", "-c", "\(command) \(Self.arguments)"]
         process.currentDirectoryURL = directory
         var env = ProcessInfo.processInfo.environment

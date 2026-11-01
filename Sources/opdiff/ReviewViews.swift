@@ -143,7 +143,7 @@ private struct AskClaudePanel: View {
                             .help("Recently used commands")
                     }
                 }
-                Text("A command or shell alias from your shell config, e.g. claude, pclaude, tclaude.")
+                Text("The claude command, or a shell alias for it from your shell config.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

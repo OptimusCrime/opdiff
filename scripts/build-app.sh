@@ -24,7 +24,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>OptimusDiff</string>
     <key>CFBundleDisplayName</key><string>OptimusDiff</string>
-    <key>CFBundleIdentifier</key><string>local.opdiff</string>
+    <key>CFBundleIdentifier</key><string>io.github.optimuscrime.opdiff</string>
     <key>CFBundleExecutable</key><string>opdiff</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>

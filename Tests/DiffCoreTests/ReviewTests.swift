@@ -41,7 +41,7 @@ final class ReviewTests: XCTestCase {
         XCTAssertThrowsError(try ClaudeOutput.parse(Data(output.utf8))) { error in
             XCTAssertTrue(error.localizedDescription.contains("error_max_turns"))
         }
-        XCTAssertThrowsError(try ClaudeOutput.parse(Data("command not found: pclaude".utf8)))
+        XCTAssertThrowsError(try ClaudeOutput.parse(Data("command not found: my-claude".utf8)))
     }
 
     func testLayoutPlacesCardsOnLastVisibleLine() throws {

@@ -87,7 +87,7 @@ final class CompareModel {
     /// Briefly highlighted after jumping to it.
     private(set) var flashedAnnotationID: String?
     private(set) var recentClaudeCommands: [String] = UserDefaults.standard.stringArray(forKey: "claudeCommands") ?? []
-    /// What the running review is about, e.g. "main...feature via pclaude".
+    /// What the running review is about, e.g. "main...feature via claude".
     private(set) var reviewTarget: String?
     private var reviewRun: ClaudeReviewRun?
     private var reviewLoadedKey: String?
