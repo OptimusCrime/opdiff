@@ -377,15 +377,21 @@ final class CompareModel {
 
     func annotationLayout(for file: FileDiff) -> AnnotationLayout? { annotationLayouts[file.id] }
 
-    func startReview(command rawCommand: String, focus: String) {
+    /// The prompt Claude gets for the current diff (what "Preview Prompt" shows).
+    func reviewPrompt(focus: String) -> String {
+        let context = ReviewContext(base: base, head: head, mergeBase: mergeBase,
+                                    includesWorkingTree: effectiveUncommitted,
+                                    commitCount: commits.count, focus: focus)
+        return ReviewPrompt.build(files: files, context: context)
+    }
+
+    /// `customPrompt` replaces the generated prompt (edited in the preview sheet).
+    func startReview(command rawCommand: String, focus: String, customPrompt: String? = nil) {
         let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let repo, !files.isEmpty, !command.isEmpty, reviewRun == nil else { return }
         rememberClaudeCommand(command)
 
-        let context = ReviewContext(base: base, head: head, mergeBase: mergeBase,
-                                    includesWorkingTree: effectiveUncommitted,
-                                    commitCount: commits.count, focus: focus)
-        let prompt = ReviewPrompt.build(files: files, context: context)
+        let prompt = customPrompt ?? reviewPrompt(focus: focus)
         let run = ClaudeReviewRun(command: command, directory: repo, prompt: prompt)
         let key = reviewKey, fingerprint = diffFingerprint
         reviewRun = run

@@ -33,8 +33,17 @@ extension AnnotationKind {
 struct AskClaudeButton: View {
     let model: CompareModel
     @State private var isOpen = false
+    @State private var draft: PromptDraft?
 
     var body: some View {
+        Group { content }
+            .sheet(item: $draft) { draft in
+                PromptPreviewSheet(model: model, draft: draft) { self.draft = nil }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if case .running(let since) = model.reviewStatus {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
@@ -72,7 +81,14 @@ struct AskClaudeButton: View {
             .help("Ask Claude to point out the lines that deserve attention")
             .disabled(model.files.isEmpty)
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-                AskClaudePanel(model: model) { isOpen = false }
+                AskClaudePanel(model: model) { isOpen = false } onPreview: { command, focus in
+                    isOpen = false
+                    // Open the sheet once the popover has gone.
+                    let prompt = model.reviewPrompt(focus: focus)
+                    DispatchQueue.main.async {
+                        draft = PromptDraft(command: command, focus: focus, prompt: prompt)
+                    }
+                }
             }
         }
     }
@@ -94,6 +110,7 @@ struct ElapsedTime: View {
 private struct AskClaudePanel: View {
     let model: CompareModel
     let close: () -> Void
+    let onPreview: (_ command: String, _ focus: String) -> Void
     @AppStorage("claudeCommand") private var command = "claude"
     @AppStorage("claudeFocus") private var focus = ""
 
@@ -150,6 +167,10 @@ private struct AskClaudePanel: View {
             HStack {
                 if model.isReviewing {
                     Button("Cancel Review", role: .destructive) { model.cancelReview() }
+                } else {
+                    Button("Preview Prompt…") { onPreview(command, focus) }
+                        .disabled(model.files.isEmpty || command.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .help("See, and edit, the full prompt before sending it to Claude")
                 }
                 Spacer()
                 Text("⌘↩").font(.caption).foregroundStyle(.tertiary)
@@ -164,6 +185,81 @@ private struct AskClaudePanel: View {
         }
         .padding(16)
         .frame(width: 400)
+    }
+}
+
+// MARK: - Prompt preview
+
+struct PromptDraft: Identifiable {
+    let id = UUID()
+    let command: String
+    let focus: String
+    let prompt: String
+}
+
+/// Shows the full prompt that will be sent to Claude and lets the user edit it first.
+private struct PromptPreviewSheet: View {
+    let model: CompareModel
+    let draft: PromptDraft
+    let close: () -> Void
+    @State private var text: String
+
+    init(model: CompareModel, draft: PromptDraft, close: @escaping () -> Void) {
+        self.model = model
+        self.draft = draft
+        self.close = close
+        _text = State(initialValue: draft.prompt)
+    }
+
+    private var isEdited: Bool { text != draft.prompt }
+    private var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Review prompt", systemImage: "text.bubble").font(.headline)
+                Text("This is sent to `\(draft.command)` on stdin. Edit it freely; the reply format "
+                     + "(summary + line comments) is enforced separately, so keep asking for those fields.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            TextEditor(text: $text)
+                .font(.system(.callout, design: .monospaced))
+                .autocorrectionDisabled()
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+
+            HStack(spacing: 10) {
+                Text("\(text.count.formatted()) characters · ~\((text.utf8.count / 4).formatted()) tokens"
+                     + (isEdited ? " · edited" : ""))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Button("Reset") { text = draft.prompt }
+                    .disabled(!isEdited)
+                    .help("Go back to the generated prompt")
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+                .help("Copy the prompt to the clipboard")
+                Spacer()
+                Button("Cancel", role: .cancel, action: close)
+                    .keyboardShortcut(.cancelAction)
+                Text("⌘↩").font(.caption).foregroundStyle(.tertiary)
+                Button("Send to Claude") {
+                    model.startReview(command: draft.command, focus: draft.focus,
+                                      customPrompt: isEdited ? text : nil)
+                    close()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(isEmpty || model.isReviewing)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 640, idealWidth: 900, minHeight: 420, idealHeight: 680)
     }
 }
 
