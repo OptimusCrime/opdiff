@@ -1,42 +1,43 @@
 import Foundation
 import XCTest
+
 @testable import DiffCore
 
 final class DiffParserTests: XCTestCase {
     let sample = """
-    diff --git a/src/app.swift b/src/app.swift
-    index 1111111..2222222 100644
-    --- a/src/app.swift
-    +++ b/src/app.swift
-    @@ -1,4 +1,5 @@ struct App {
-     let a = 1
-    -let b = 2
-    +let b = 3
-    +let c = 4
-     let d = 5
-    -let e = 6
-    \\ No newline at end of file
-    diff --git a/new file.txt b/new file.txt
-    new file mode 100644
-    index 0000000..3333333
-    --- /dev/null
-    +++ b/new file.txt\t
-    @@ -0,0 +1 @@
-    +hello
-    diff --git a/old.txt b/renamed.txt
-    similarity index 100%
-    rename from old.txt
-    rename to renamed.txt
-    diff --git a/logo.png b/logo.png
-    index 4444444..5555555 100644
-    Binary files a/logo.png and b/logo.png differ
-    diff --git a/gone.txt b/gone.txt
-    deleted file mode 100644
-    --- a/gone.txt
-    +++ /dev/null
-    @@ -1 +0,0 @@
-    --- looks like a header but is content
-    """
+        diff --git a/src/app.swift b/src/app.swift
+        index 1111111..2222222 100644
+        --- a/src/app.swift
+        +++ b/src/app.swift
+        @@ -1,4 +1,5 @@ struct App {
+         let a = 1
+        -let b = 2
+        +let b = 3
+        +let c = 4
+         let d = 5
+        -let e = 6
+        \\ No newline at end of file
+        diff --git a/new file.txt b/new file.txt
+        new file mode 100644
+        index 0000000..3333333
+        --- /dev/null
+        +++ b/new file.txt\t
+        @@ -0,0 +1 @@
+        +hello
+        diff --git a/old.txt b/renamed.txt
+        similarity index 100%
+        rename from old.txt
+        rename to renamed.txt
+        diff --git a/logo.png b/logo.png
+        index 4444444..5555555 100644
+        Binary files a/logo.png and b/logo.png differ
+        diff --git a/gone.txt b/gone.txt
+        deleted file mode 100644
+        --- a/gone.txt
+        +++ /dev/null
+        @@ -1 +0,0 @@
+        --- looks like a header but is content
+        """
 
     func testParsesFiles() {
         let files = DiffParser.parse(Data(sample.utf8))
@@ -110,7 +111,8 @@ final class GitIntegrationTests: XCTestCase {
 
         let cmp = try Git.compare(repo: dir, base: "main", head: "feature", includeWorkingTree: false)
         for algorithm in DiffAlgorithm.allCases {
-            let other = try Git.compare(repo: dir, base: "main", head: "feature", includeWorkingTree: false, algorithm: algorithm)
+            let other = try Git.compare(
+                repo: dir, base: "main", head: "feature", includeWorkingTree: false, algorithm: algorithm)
             XCTAssertEqual(other.files.map(\.path), ["a.txt", "b.txt"], "\(algorithm)")
         }
         XCTAssertEqual(cmp.files.map(\.path), ["a.txt", "b.txt"])

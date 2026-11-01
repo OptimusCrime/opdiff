@@ -45,8 +45,9 @@ actor SyntaxHighlighter {
 
     func highlight(_ file: FileDiff, dark: Bool) -> HighlightedFile? {
         guard let language = Self.language(for: file.path),
-              file.lineCount <= Self.maxLines,
-              let engine = engine(dark: dark) else { return nil }
+            file.lineCount <= Self.maxLines,
+            let engine = engine(dark: dark)
+        else { return nil }
 
         var result = HighlightedFile()
         for hunk in file.hunks {
@@ -54,11 +55,13 @@ actor SyntaxHighlighter {
             let oldSide = hunk.lines.filter { $0.kind == .context || $0.kind == .deletion }
             let newSide = hunk.lines.filter { $0.kind == .context || $0.kind == .addition }
             for (number, text) in highlightLines(oldSide.map(\.text), engine: engine, language: language)
-                .enumerated().compactMap({ i, t in t.map { (oldSide[i].oldNumber, $0) } }) {
+                .enumerated().compactMap({ i, t in t.map { (oldSide[i].oldNumber, $0) } })
+            {
                 if let number { result.old[number] = text }
             }
             for (number, text) in highlightLines(newSide.map(\.text), engine: engine, language: language)
-                .enumerated().compactMap({ i, t in t.map { (newSide[i].newNumber, $0) } }) {
+                .enumerated().compactMap({ i, t in t.map { (newSide[i].newNumber, $0) } })
+            {
                 if let number { result.new[number] = text }
             }
         }
@@ -83,8 +86,9 @@ actor SyntaxHighlighter {
             let end = newline.location == NSNotFound ? ns.length : newline.location
             let lineRange = NSRange(location: start, length: end - start)
             let index = output.count
-            output.append(ns.substring(with: lineRange) == source[index]
-                          ? Self.convert(rendered, range: lineRange) : nil)
+            output.append(
+                ns.substring(with: lineRange) == source[index]
+                    ? Self.convert(rendered, range: lineRange) : nil)
             if newline.location == NSNotFound { break }
             start = end + 1
         }

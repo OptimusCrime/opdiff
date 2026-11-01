@@ -1,7 +1,10 @@
 PREFIX  ?= $(HOME)/.local/bin
 APP_DIR ?= $(HOME)/Applications
 
-.PHONY: app install uninstall test run icon
+.PHONY: app build install uninstall test run icon format lint check
+
+# Swift sources checked by `make format` / `make lint` (style in .swift-format).
+SWIFT_SOURCES = Package.swift Sources Tests scripts/make-icon.swift
 
 app:
 	./scripts/build-app.sh
@@ -18,8 +21,20 @@ install: app
 uninstall:
 	rm -rf "$(APP_DIR)/OptimusDiff.app" "$(PREFIX)/opdiff" "$(PREFIX)/git-opdiff"
 
+build:
+	swift build
+
 test:
 	swift test
+
+format:
+	swift format --in-place --recursive --parallel $(SWIFT_SOURCES)
+
+lint:
+	swift format lint --strict --recursive --parallel $(SWIFT_SOURCES)
+
+# What CI should run: formatting, build and tests.
+check: lint build test
 
 icon:
 	swift scripts/make-icon.swift

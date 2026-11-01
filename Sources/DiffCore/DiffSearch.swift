@@ -20,8 +20,10 @@ public enum DiffSearch {
                     let text = line.displayText
                     var from = text.startIndex
                     while from < text.endIndex,
-                          let r = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive],
-                                             range: from..<text.endIndex) {
+                        let r = text.range(
+                            of: query, options: [.caseInsensitive, .diacriticInsensitive],
+                            range: from..<text.endIndex)
+                    {
                         let start = text.distance(from: text.startIndex, to: r.lowerBound)
                         let length = text.distance(from: r.lowerBound, to: r.upperBound)
                         matches.append(SearchMatch(fileID: file.id, line: line.id, range: start..<(start + length)))
@@ -45,7 +47,8 @@ public enum DiffNavigation {
             if isChange(row) {
                 if start == nil { start = i }
             } else if let s = start {
-                blocks.append(s...(i - 1)); start = nil
+                blocks.append(s...(i - 1))
+                start = nil
             }
         }
         if let s = start { blocks.append(s...(rows.count - 1)) }

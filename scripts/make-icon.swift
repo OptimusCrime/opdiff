@@ -16,8 +16,9 @@ func drawIcon(in ctx: CGContext) {
 
     // Soft drop shadow.
     ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
-                  color: CGColor(gray: 0, alpha: 0.35))
+    ctx.setShadow(
+        offset: CGSize(width: 0, height: -12), blur: 28,
+        color: CGColor(gray: 0, alpha: 0.35))
     ctx.addPath(shape)
     ctx.setFillColor(CGColor(srgbRed: 0.10, green: 0.13, blue: 0.22, alpha: 1))
     ctx.fillPath()
@@ -29,16 +30,22 @@ func drawIcon(in ctx: CGContext) {
     ctx.clip()
     let gradient = CGGradient(
         colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
-        colors: [CGColor(srgbRed: 0.20, green: 0.25, blue: 0.40, alpha: 1),
-                 CGColor(srgbRed: 0.08, green: 0.10, blue: 0.18, alpha: 1)] as CFArray,
+        colors: [
+            CGColor(srgbRed: 0.20, green: 0.25, blue: 0.40, alpha: 1),
+            CGColor(srgbRed: 0.08, green: 0.10, blue: 0.18, alpha: 1),
+        ] as CFArray,
         locations: [0, 1])!
-    ctx.drawLinearGradient(gradient, start: CGPoint(x: s / 2, y: body.maxY),
-                           end: CGPoint(x: s / 2, y: body.minY), options: [])
+    ctx.drawLinearGradient(
+        gradient, start: CGPoint(x: s / 2, y: body.maxY),
+        end: CGPoint(x: s / 2, y: body.minY), options: [])
     ctx.restoreGState()
 
     // Three diff lines.
-    let left: CGFloat = 250, right: CGFloat = 774
-    let barHeight: CGFloat = 112, gap: CGFloat = 44, radius: CGFloat = 26
+    let left: CGFloat = 250
+    let right: CGFloat = 774
+    let barHeight: CGFloat = 112
+    let gap: CGFloat = 44
+    let radius: CGFloat = 26
     let total = barHeight * 3 + gap * 2
     let top = s / 2 + total / 2
 
@@ -60,14 +67,20 @@ func drawIcon(in ctx: CGContext) {
     }
 
     func sign(in rect: CGRect, plus: Bool) {
-        let cx = rect.minX + 78, cy = rect.midY
-        let len: CGFloat = 58, thick: CGFloat = 16
+        let cx = rect.minX + 78
+        let cy = rect.midY
+        let len: CGFloat = 58
+        let thick: CGFloat = 16
         ctx.setFillColor(CGColor(gray: 1, alpha: 1))
-        ctx.addPath(CGPath(roundedRect: CGRect(x: cx - len / 2, y: cy - thick / 2, width: len, height: thick),
-                           cornerWidth: thick / 2, cornerHeight: thick / 2, transform: nil))
+        ctx.addPath(
+            CGPath(
+                roundedRect: CGRect(x: cx - len / 2, y: cy - thick / 2, width: len, height: thick),
+                cornerWidth: thick / 2, cornerHeight: thick / 2, transform: nil))
         if plus {
-            ctx.addPath(CGPath(roundedRect: CGRect(x: cx - thick / 2, y: cy - len / 2, width: thick, height: len),
-                               cornerWidth: thick / 2, cornerHeight: thick / 2, transform: nil))
+            ctx.addPath(
+                CGPath(
+                    roundedRect: CGRect(x: cx - thick / 2, y: cy - len / 2, width: thick, height: len),
+                    cornerWidth: thick / 2, cornerHeight: thick / 2, transform: nil))
         }
         ctx.fillPath()
     }
@@ -88,9 +101,10 @@ func drawIcon(in ctx: CGContext) {
 }
 
 func png(size: Int) -> Data {
-    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
-                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     let ctx = NSGraphicsContext(bitmapImageRep: rep)!.cgContext
     ctx.scaleBy(x: CGFloat(size) / canvas, y: CGFloat(size) / canvas)
     drawIcon(in: ctx)

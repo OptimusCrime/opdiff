@@ -1,4 +1,5 @@
 import AppKit
+import DiffCore
 
 /// The editor that "Open in Editor" uses (chosen in Settings).
 enum EditorChoice: String, CaseIterable, Identifiable {
@@ -42,7 +43,8 @@ enum EditorChoice: String, CaseIterable, Identifiable {
     }
 
     var isInstalled: Bool {
-        bundleIDs.isEmpty || bundleIDs.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+        bundleIDs.isEmpty
+            || bundleIDs.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
     }
 
     /// The saved choice, else the first installed editor.
@@ -61,7 +63,8 @@ enum EditorOpener {
     static func open(_ file: URL, line: Int?, editor: EditorChoice = .current) {
         let path = file.path
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let query = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(["&", "=", "+"])) ?? path
+        let query =
+            path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(["&", "=", "+"])) ?? path
         let lineSuffix = line.map { ":\($0)" } ?? ""
 
         switch editor {
@@ -75,13 +78,14 @@ enum EditorOpener {
         case .systemDefault:
             NSWorkspace.shared.open(file)
         case .custom:
-            let template = UserDefaults.standard.string(forKey: "customEditorCommand")
+            let template =
+                UserDefaults.standard.string(forKey: "customEditorCommand")
                 .flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? defaultCustomCommand
-            let command = template
+            let command =
+                template
                 .replacingOccurrences(of: "{file}", with: shellQuote(path))
                 .replacingOccurrences(of: "{line}", with: String(line ?? 1))
-            let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
-            run(shell, ["-l", "-c", command])
+            run(UserShell.path, ["-l", "-c", command])
         }
     }
 

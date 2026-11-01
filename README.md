@@ -86,9 +86,15 @@ The single-letter shortcuts are also in the **Go** menu, and don't fire while yo
 
 ```sh
 swift run opdiff         # run from source (uses the current directory if it's a repo)
+make build               # debug build
 make test                # parser, git integration and review tests
+make format              # format the code with swift-format (ships with Xcode / the Swift toolchain)
+make lint                # check formatting without changing files
+make check               # lint + build + test
 make icon                # regenerate Resources/AppIcon.icns from scripts/make-icon.swift
 ```
+
+Code style is defined in `.swift-format` (4-space indent, 120 columns). Run `make format` before committing.
 
 - `Sources/DiffCore` — git invocation, unified-diff parsing, word diffs, search and the Claude review/question prompts (no UI, tested)
 - `Sources/opdiff` — SwiftUI app

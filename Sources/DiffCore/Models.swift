@@ -26,7 +26,10 @@ extension DiffLine {
 public struct LineID: Hashable, Sendable {
     public let old: Int?
     public let new: Int?
-    public init(old: Int?, new: Int?) { self.old = old; self.new = new }
+    public init(old: Int?, new: Int?) {
+        self.old = old
+        self.new = new
+    }
 }
 
 public struct Hunk: Sendable {
@@ -35,7 +38,11 @@ public struct Hunk: Sendable {
 }
 
 public enum FileStatus: String, Sendable {
-    case added = "A", deleted = "D", modified = "M", renamed = "R", copied = "C"
+    case added = "A"
+    case deleted = "D"
+    case modified = "M"
+    case renamed = "R"
+    case copied = "C"
 }
 
 /// A pre-computed display row, so the UI never has to do work while scrolling.

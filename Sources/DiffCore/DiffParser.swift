@@ -6,7 +6,8 @@ public enum DiffParser {
         var files: [FileDiff] = []
         var current: FileBuilder?
         var inHunk = false
-        var oldNo = 0, newNo = 0
+        var oldNo = 0
+        var newNo = 0
 
         // Split on raw bytes so "\r\n" and invalid UTF-8 never trip us up.
         for raw in data.split(separator: 0x0A, omittingEmptySubsequences: false) {
@@ -33,7 +34,8 @@ public enum DiffParser {
                 switch first {
                 case " ":
                     b.append(DiffLine(kind: .context, text: text, oldNumber: oldNo, newNumber: newNo))
-                    oldNo += 1; newNo += 1
+                    oldNo += 1
+                    newNo += 1
                     continue
                 case "+":
                     b.append(DiffLine(kind: .addition, text: text, oldNumber: nil, newNumber: newNo))
@@ -57,13 +59,17 @@ public enum DiffParser {
             } else if line.hasPrefix("deleted file mode") {
                 b.status = .deleted
             } else if line.hasPrefix("rename from ") {
-                b.oldPath = String(line.dropFirst("rename from ".count)); b.status = .renamed
+                b.oldPath = String(line.dropFirst("rename from ".count))
+                b.status = .renamed
             } else if line.hasPrefix("rename to ") {
-                b.newPath = String(line.dropFirst("rename to ".count)); b.status = .renamed
+                b.newPath = String(line.dropFirst("rename to ".count))
+                b.status = .renamed
             } else if line.hasPrefix("copy from ") {
-                b.oldPath = String(line.dropFirst("copy from ".count)); b.status = .copied
+                b.oldPath = String(line.dropFirst("copy from ".count))
+                b.status = .copied
             } else if line.hasPrefix("copy to ") {
-                b.newPath = String(line.dropFirst("copy to ".count)); b.status = .copied
+                b.newPath = String(line.dropFirst("copy to ".count))
+                b.status = .copied
             } else if line.hasPrefix("--- ") {
                 b.oldPath = cleanPath(String(line.dropFirst(4)), prefix: "a/")
             } else if line.hasPrefix("+++ ") {
@@ -101,7 +107,8 @@ public enum DiffParser {
         let chars = Array(s)
         if chars.count % 2 == 1 {
             let half = chars.count / 2
-            let a = String(chars[..<half]), b = String(chars[(half + 1)...])
+            let a = String(chars[..<half])
+            let b = String(chars[(half + 1)...])
             if a.hasPrefix("a/"), b.hasPrefix("b/"), a.dropFirst(2) == b.dropFirst(2) {
                 return (String(a.dropFirst(2)), String(b.dropFirst(2)))
             }
@@ -116,12 +123,14 @@ public enum DiffParser {
         var rows: [DiffRow] = []
         for hunk in hunks {
             rows.append(.hunk(hunk.header))
-            var dels: [DiffLine] = [], adds: [DiffLine] = []
+            var dels: [DiffLine] = []
+            var adds: [DiffLine] = []
             func flush() {
                 for i in 0..<max(dels.count, adds.count) {
                     rows.append(.pair(i < dels.count ? dels[i] : nil, i < adds.count ? adds[i] : nil))
                 }
-                dels.removeAll(); adds.removeAll()
+                dels.removeAll()
+                adds.removeAll()
             }
             for line in hunk.lines {
                 switch line.kind {
@@ -131,9 +140,11 @@ public enum DiffParser {
                 case .addition:
                     adds.append(line)
                 case .context:
-                    flush(); rows.append(.pair(line, line))
+                    flush()
+                    rows.append(.pair(line, line))
                 case .noNewline:
-                    flush(); rows.append(.line(line))
+                    flush()
+                    rows.append(.line(line))
                 }
             }
             flush()
@@ -167,7 +178,8 @@ final class FileBuilder {
         if status == .deleted { newPath = nil }
         if status == .modified, let o = oldPath, let n = newPath, o != n { status = .renamed }
 
-        var hasher = Hasher(), changes = Hasher()
+        var hasher = Hasher()
+        var changes = Hasher()
         var maxLine = 0
         for hunk in hunks {
             for line in hunk.lines {

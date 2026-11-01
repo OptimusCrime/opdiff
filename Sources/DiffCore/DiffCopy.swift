@@ -28,15 +28,25 @@ public enum DiffCopy {
     }
 
     /// "path:12" / "path:12-20" using new-file line numbers (old ones if only deleted lines).
-    public static func reference<Rows: Sequence>(_ rows: Rows, in file: FileDiff) -> String where Rows.Element == DiffRow {
-        var newNumbers: [Int] = [], oldNumbers: [Int] = []
+    public static func reference<Rows: Sequence>(_ rows: Rows, in file: FileDiff) -> String
+    where Rows.Element == DiffRow {
+        var newNumbers: [Int] = []
+        var oldNumbers: [Int] = []
         for row in rows {
             switch row {
             case .hunk: break
             case .line(let line):
-                if let n = line.newNumber { newNumbers.append(n) } else if let n = line.oldNumber { oldNumbers.append(n) }
+                if let n = line.newNumber {
+                    newNumbers.append(n)
+                } else if let n = line.oldNumber {
+                    oldNumbers.append(n)
+                }
             case .pair(let old, let new):
-                if let n = new?.newNumber { newNumbers.append(n) } else if let n = old?.oldNumber { oldNumbers.append(n) }
+                if let n = new?.newNumber {
+                    newNumbers.append(n)
+                } else if let n = old?.oldNumber {
+                    oldNumbers.append(n)
+                }
             }
         }
         let numbers = newNumbers.isEmpty ? oldNumbers : newNumbers

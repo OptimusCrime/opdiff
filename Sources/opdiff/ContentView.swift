@@ -40,8 +40,8 @@ struct ContentView: View {
                             ReviewInspector(model: model, onClose: { showReview = false }) { annotation in
                                 model.jump(to: annotation)
                             }
-                                .frame(width: reviewPaneWidth)
-                                .background(Color(nsColor: .windowBackgroundColor))
+                            .frame(width: reviewPaneWidth)
+                            .background(Color(nsColor: .windowBackgroundColor))
                         }
                     }
                 }
@@ -55,7 +55,10 @@ struct ContentView: View {
         .background(WindowReader { model.mainWindow = $0 })
         .onAppear(perform: installKeyMonitor)
         .navigationTitle(model.repo?.lastPathComponent ?? "OptimusDiff")
-        .navigationSubtitle(model.base.isEmpty || model.head.isEmpty ? "" : "\(model.displayName(model.base))...\(model.displayName(model.head))")
+        .navigationSubtitle(
+            model.base.isEmpty || model.head.isEmpty
+                ? "" : "\(model.displayName(model.base))...\(model.displayName(model.head))"
+        )
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
             Task { await model.openRepository(url) }
@@ -68,8 +71,12 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Picker("Compare", selection: Binding(get: { model.mode },
-                                                 set: { mode in Task { await model.setMode(mode) } })) {
+            Picker(
+                "Compare",
+                selection: Binding(
+                    get: { model.mode },
+                    set: { mode in Task { await model.setMode(mode) } })
+            ) {
                 Text("Branches").tag(CompareMode.branches)
                 Text("Commits").tag(CompareMode.commits)
             }
@@ -81,28 +88,40 @@ struct ContentView: View {
                 BranchPicker(title: "base", selection: $model.base, branches: model.branches)
                 Image(systemName: "arrow.left").foregroundStyle(.secondary)
                 BranchPicker(title: "compare", selection: $model.head, branches: model.branches)
-                Button { model.swap() } label: { Image(systemName: "arrow.left.arrow.right") }
-                    .help("Swap base and compare (⇧⌘S)")
+                Button {
+                    model.swap()
+                } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                }
+                .help("Swap base and compare (⇧⌘S)")
             } else {
-                CommitPicker(title: "base", selection: model.base, commits: model.history, model: model,
-                             role: .base) { sha in Task { await model.selectBaseCommit(sha) } }
+                CommitPicker(
+                    title: "base", selection: model.base, commits: model.history, model: model,
+                    role: .base
+                ) { sha in Task { await model.selectBaseCommit(sha) } }
                 Image(systemName: "arrow.left").foregroundStyle(.secondary)
-                CommitPicker(title: "compare", selection: model.head, commits: model.commitsAfterBase, model: model,
-                             role: .compare) { sha in model.selectCompareCommit(sha) }
-                    .disabled(model.base.isEmpty)
-                    .help(model.base.isEmpty ? "Select a base commit first" : "")
+                CommitPicker(
+                    title: "compare", selection: model.head, commits: model.commitsAfterBase, model: model,
+                    role: .compare
+                ) { sha in model.selectCompareCommit(sha) }
+                .disabled(model.base.isEmpty)
+                .help(model.base.isEmpty ? "Select a base commit first" : "")
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             // Shows the effective state: unchecked when it can't apply (e.g. compare is a commit).
-            Toggle("Include uncommitted", isOn: Binding(
-                get: { model.effectiveUncommitted },
-                set: { model.includeUncommitted = $0 }))
-                .toggleStyle(.checkbox)
-                .disabled(!model.canIncludeUncommitted)
-                .help(model.canIncludeUncommitted
-                      ? "Include staged, unstaged and untracked changes in the working tree"
-                      : "Only available when 'compare' is the checked-out branch (\(model.currentBranch ?? "none"))")
+            Toggle(
+                "Include uncommitted",
+                isOn: Binding(
+                    get: { model.effectiveUncommitted },
+                    set: { model.includeUncommitted = $0 })
+            )
+            .toggleStyle(.checkbox)
+            .disabled(!model.canIncludeUncommitted)
+            .help(
+                model.canIncludeUncommitted
+                    ? "Include staged, unstaged and untracked changes in the working tree"
+                    : "Only available when 'compare' is the checked-out branch (\(model.currentBranch ?? "none"))")
             AskClaudeButton(model: model)
             Picker("Layout", selection: $model.splitView) {
                 Image(systemName: "rectangle").help("Unified").tag(false)
@@ -110,9 +129,15 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
             .help("Unified or split view")
-            Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                .help("Refresh (⌘R)")
-            Button { showReview.toggle() } label: {
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("Refresh (⌘R)")
+            Button {
+                showReview.toggle()
+            } label: {
                 Label("Claude Review", systemImage: "sidebar.right")
             }
             .help(showReview ? "Hide the Claude review panel" : "Show the Claude review panel")
@@ -169,7 +194,10 @@ struct BranchPicker: View {
     }
 
     var body: some View {
-        Button { query = ""; isOpen.toggle() } label: {
+        Button {
+            query = ""
+            isOpen.toggle()
+        } label: {
             PickerLabel(title: title, value: selection.isEmpty ? nil : selection)
         }
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
@@ -178,7 +206,9 @@ struct BranchPicker: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { choose(matches.first ?? query) }
                 List(matches, id: \.self) { branch in
-                    Button { choose(branch) } label: {
+                    Button {
+                        choose(branch)
+                    } label: {
                         HStack {
                             Image(systemName: "checkmark").opacity(branch == selection ? 1 : 0)
                             Text(branch).lineLimit(1)
@@ -230,11 +260,15 @@ struct CommitPicker: View {
     }
 
     var body: some View {
-        Button { query = ""; isOpen.toggle() } label: {
-            PickerLabel(title: title,
-                        value: selectedCommit.map { "\($0.hash) \($0.subject)" }
-                            ?? (selection.isEmpty ? nil : model.displayName(selection)),
-                        isCommit: true)
+        Button {
+            query = ""
+            isOpen.toggle()
+        } label: {
+            PickerLabel(
+                title: title,
+                value: selectedCommit.map { "\($0.hash) \($0.subject)" }
+                    ?? (selection.isEmpty ? nil : model.displayName(selection)),
+                isCommit: true)
         }
         .help(selectedCommit.map { "\($0.hash) \($0.subject)\n\($0.author) · \($0.date)" } ?? "")
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
@@ -244,8 +278,12 @@ struct CommitPicker: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { if let first = matches.first { choose(first.sha) } }
                 List(matches) { commit in
-                    Button { choose(commit.sha) } label: { row(commit) }
-                        .buttonStyle(.plain)
+                    Button {
+                        choose(commit.sha)
+                    } label: {
+                        row(commit)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .listStyle(.plain)
                 .overlay {

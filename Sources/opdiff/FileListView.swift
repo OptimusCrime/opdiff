@@ -16,8 +16,9 @@ struct FileListView: View {
         let tree = FileTreeNode.build(files)
         List(selection: $selection) {
             ForEach(tree) { node in
-                TreeNodeView(node: node, model: model, collapsedDirs: $collapsedDirs,
-                             forceExpanded: !filter.isEmpty)
+                TreeNodeView(
+                    node: node, model: model, collapsedDirs: $collapsedDirs,
+                    forceExpanded: !filter.isEmpty)
             }
         }
         .overlay {
@@ -37,9 +38,11 @@ struct FileListView: View {
                         Divider()
                         Button("Expand All Diffs") { model.expandAll() }
                         Button("Collapse All Diffs") { model.collapseAll() }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(.bar)
@@ -72,8 +75,12 @@ struct FileTreeNode: Identifiable {
         for file in files {
             var dir = root
             for component in file.path.split(separator: "/").dropLast().map(String.init) {
-                if let next = dir.dirs[component] { dir = next } else {
-                    let next = Dir(); dir.dirs[component] = next; dir = next
+                if let next = dir.dirs[component] {
+                    dir = next
+                } else {
+                    let next = Dir()
+                    dir.dirs[component] = next
+                    dir = next
                 }
             }
             dir.files.append(file)
@@ -84,21 +91,26 @@ struct FileTreeNode: Identifiable {
     private static func nodes(in dir: Dir, prefix: String) -> [FileTreeNode] {
         let folders = dir.dirs.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { key in
             // Collapse chains of single-child folders into one row, e.g. "Sources/opdiff".
-            var name = key, sub = dir.dirs[key]!
+            var name = key
+            var sub = dir.dirs[key]!
             while sub.files.isEmpty, sub.dirs.count == 1, let (childName, child) = sub.dirs.first {
                 name += "/" + childName
                 sub = child
             }
             let path = prefix + name
             let children = nodes(in: sub, prefix: path + "/")
-            return FileTreeNode(id: "dir:" + path, name: name, children: children, file: nil,
-                                additions: children.reduce(0) { $0 + $1.additions },
-                                deletions: children.reduce(0) { $0 + $1.deletions })
+            return FileTreeNode(
+                id: "dir:" + path, name: name, children: children, file: nil,
+                additions: children.reduce(0) { $0 + $1.additions },
+                deletions: children.reduce(0) { $0 + $1.deletions })
         }
         let files = dir.files
             .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-            .map { FileTreeNode(id: $0.id, name: ($0.path as NSString).lastPathComponent, children: nil,
-                                file: $0, additions: $0.additions, deletions: $0.deletions) }
+            .map {
+                FileTreeNode(
+                    id: $0.id, name: ($0.path as NSString).lastPathComponent, children: nil,
+                    file: $0, additions: $0.additions, deletions: $0.deletions)
+            }
         return folders + files
     }
 }
@@ -113,8 +125,9 @@ private struct TreeNodeView: View {
         if let children = node.children {
             DisclosureGroup(isExpanded: expanded) {
                 ForEach(children) { child in
-                    TreeNodeView(node: child, model: model, collapsedDirs: $collapsedDirs,
-                                 forceExpanded: forceExpanded)
+                    TreeNodeView(
+                        node: child, model: model, collapsedDirs: $collapsedDirs,
+                        forceExpanded: forceExpanded)
                 }
             } label: {
                 HStack(spacing: 6) {
@@ -132,9 +145,11 @@ private struct TreeNodeView: View {
             }
         } else if let file = node.file {
             let annotations = model.annotations(for: file)
-            FileRow(file: file, name: node.name, viewed: model.isViewed(file),
-                    annotationCount: annotations.count, strongestAnnotation: annotations.map(\.kind).max())
-                .tag(file.id)
+            FileRow(
+                file: file, name: node.name, viewed: model.isViewed(file),
+                annotationCount: annotations.count, strongestAnnotation: annotations.map(\.kind).max()
+            )
+            .tag(file.id)
         }
     }
 

@@ -9,8 +9,10 @@ public struct ReviewContext: Sendable {
     public var commitCount: Int
     public var focus: String
 
-    public init(base: String, head: String, mergeBase: String?, includesWorkingTree: Bool,
-                commitCount: Int, focus: String) {
+    public init(
+        base: String, head: String, mergeBase: String?, includesWorkingTree: Bool,
+        commitCount: Int, focus: String
+    ) {
         self.base = base
         self.head = head
         self.mergeBase = mergeBase
@@ -32,40 +34,41 @@ public enum ReviewPrompt {
 
     public static func build(files: [FileDiff], context: ReviewContext) -> String {
         var prompt = """
-        You are helping a developer review a code change before they open a pull request. \
-        Your job is to point their attention at the lines that matter. You will not edit anything.
+            You are helping a developer review a code change before they open a pull request. \
+            Your job is to point their attention at the lines that matter. You will not edit anything.
 
-        Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
-        \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
-        \(context.includesWorkingTree ? ", including uncommitted and untracked changes in the working tree" : "")\
-        . \(context.commitCount) commit(s), \(files.count) file(s) changed.
+            Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
+            \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
+            \(context.includesWorkingTree ? ", including uncommitted and untracked changes in the working tree" : "")\
+            . \(context.commitCount) commit(s), \(files.count) file(s) changed.
 
-        Return a short `summary` (2–4 sentences: what the change does and the main risks) and a list of \
-        `annotations`. Each annotation marks a range of lines in one file:
-        - `kind`: "important" for likely bugs, risky logic, security or data-loss issues, breaking changes; \
-        "attention" for subtle code that deserves a careful look; "info" for context that helps the reviewer \
-        understand the change.
-        - `file`: the path exactly as shown after "FILE:".
-        - `side` + `startLine`/`endLine`: use side "new" with the NEW line numbers for added (+) or \
-        unchanged lines, and side "old" with the OLD line numbers for deleted (-) lines. Only reference lines \
-        that appear in the diff below; the numbers are printed in the OLD and NEW columns.
-        - `comment`: 1–3 concise sentences saying why these lines matter.
+            Return a short `summary` (2–4 sentences: what the change does and the main risks) and a list of \
+            `annotations`. Each annotation marks a range of lines in one file:
+            - `kind`: "important" for likely bugs, risky logic, security or data-loss issues, breaking changes; \
+            "attention" for subtle code that deserves a careful look; "info" for context that helps the reviewer \
+            understand the change.
+            - `file`: the path exactly as shown after "FILE:".
+            - `side` + `startLine`/`endLine`: use side "new" with the NEW line numbers for added (+) or \
+            unchanged lines, and side "old" with the OLD line numbers for deleted (-) lines. Only reference lines \
+            that appear in the diff below; the numbers are printed in the OLD and NEW columns.
+            - `comment`: 1–3 concise sentences saying why these lines matter.
 
-        Prefer a handful of high-signal annotations over many small ones (usually no more than 15–20). \
-        Do not annotate formatting, renames or trivial changes. If nothing stands out, return few or no \
-        annotations and say so in the summary.
+            Prefer a handful of high-signal annotations over many small ones (usually no more than 15–20). \
+            Do not annotate formatting, renames or trivial changes. If nothing stands out, return few or no \
+            annotations and say so in the summary.
 
-        You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
-        history. Files on disk reflect the current working tree, which may differ from the compared \
-        version; use `git show <ref>:<path>` to see a file at a specific commit.
+            You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
+            history. Files on disk reflect the current working tree, which may differ from the compared \
+            version; use `git show <ref>:<path>` to see a file at a specific commit.
 
-        """
+            """
         let focus = context.focus.trimmingCharacters(in: .whitespacesAndNewlines)
         if !focus.isEmpty {
             prompt += "\nThe developer asked you to focus on: \(focus)\n"
         }
 
-        prompt += "\n# Diff\n\nColumns: OLD line number, NEW line number, marker (+ added, - deleted, space unchanged), code.\n"
+        prompt +=
+            "\n# Diff\n\nColumns: OLD line number, NEW line number, marker (+ added, - deleted, space unchanged), code.\n"
         var used = prompt.count
         var omitted: [FileDiff] = []
         for file in files {
@@ -78,9 +81,11 @@ public enum ReviewPrompt {
             used += rendered.count
         }
         if !omitted.isEmpty {
-            prompt += "\n# Files not included above (diff too large)\n\nInspect these with the command shown if relevant:\n"
+            prompt +=
+                "\n# Files not included above (diff too large)\n\nInspect these with the command shown if relevant:\n"
             for file in omitted {
-                prompt += "- \(file.path) (+\(file.additions) −\(file.deletions)): `\(context.diffCommand(for: file.path))`\n"
+                prompt +=
+                    "- \(file.path) (+\(file.additions) −\(file.deletions)): `\(context.diffCommand(for: file.path))`\n"
             }
         }
         return prompt
@@ -91,7 +96,8 @@ public enum ReviewPrompt {
         switch file.status {
         case .added: out += " (new file)"
         case .deleted: out += " (deleted)"
-        case .renamed, .copied: out += " (\(file.status == .renamed ? "renamed" : "copied") from \(file.oldPath ?? "?"))"
+        case .renamed, .copied:
+            out += " (\(file.status == .renamed ? "renamed" : "copied") from \(file.oldPath ?? "?"))"
         case .modified: break
         }
         out += "\n"
@@ -130,22 +136,22 @@ public enum QuestionPrompt {
 
     public static func build(file: FileDiff, selected: [DiffLine], question: String, context: ReviewContext) -> String {
         var prompt = """
-        A developer is reviewing a code change and has a question about some lines in it. \
-        Answer the question directly and concisely (usually a few short paragraphs at most). \
-        Use Markdown for code and emphasis. You will not edit anything.
+            A developer is reviewing a code change and has a question about some lines in it. \
+            Answer the question directly and concisely (usually a few short paragraphs at most). \
+            Use Markdown for code and emphasis. You will not edit anything.
 
-        Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
-        \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
-        \(context.includesWorkingTree ? ", including uncommitted changes in the working tree" : "").
+            Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
+            \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
+            \(context.includesWorkingTree ? ", including uncommitted changes in the working tree" : "").
 
-        You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
-        history. Files on disk reflect the current working tree.
+            You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
+            history. Files on disk reflect the current working tree.
 
-        # The lines the question is about (\(file.path))
+            # The lines the question is about (\(file.path))
 
-        Columns: OLD line number, NEW line number, marker (+ added, - deleted, space unchanged), code.
+            Columns: OLD line number, NEW line number, marker (+ added, - deleted, space unchanged), code.
 
-        """
+            """
         for line in selected where line.kind != .noNewline {
             prompt += ReviewPrompt.renderLine(line) + "\n"
         }
@@ -155,7 +161,8 @@ public enum QuestionPrompt {
         if fileDiff.count <= maxFileDiffCharacters {
             prompt += "\n# The whole diff of this file, for context\n" + fileDiff
         } else {
-            prompt += "\n# Context\n\nThe file's diff is large; inspect it with `\(context.diffCommand(for: file.path))` if needed.\n"
+            prompt +=
+                "\n# Context\n\nThe file's diff is large; inspect it with `\(context.diffCommand(for: file.path))` if needed.\n"
         }
         return prompt
     }
@@ -182,11 +189,11 @@ public final class ClaudeReviewRun: @unchecked Sendable {
     /// Arguments appended to the user's command. Read-only tools; Bash limited to git
     /// read commands; no MCP servers, skills or saved session.
     static let arguments = """
-    -p --output-format json --json-schema "$OPDIFF_REVIEW_SCHEMA" \
-    --tools Read Grep Glob Bash \
-    --allowedTools Read Grep Glob "Bash(git diff *)" "Bash(git show *)" "Bash(git log *)" \
-    --strict-mcp-config --disable-slash-commands --no-session-persistence
-    """
+        -p --output-format json --json-schema "$OPDIFF_REVIEW_SCHEMA" \
+        --tools Read Grep Glob Bash \
+        --allowedTools Read Grep Glob "Bash(git diff *)" "Bash(git show *)" "Bash(git log *)" \
+        --strict-mcp-config --disable-slash-commands --no-session-persistence
+        """
 
     /// Runs a review. Blocking; call off the main thread.
     public func run() throws -> ClaudeResult { try execute(ClaudeOutput.parse) }
@@ -195,7 +202,7 @@ public final class ClaudeReviewRun: @unchecked Sendable {
     public func runAnswer() throws -> ClaudeAnswer { try execute(ClaudeOutput.parseAnswer) }
 
     private func execute<T>(_ parse: (Data) throws -> T) throws -> T {
-        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+        let shell = UserShell.path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         // -l: login profile (PATH), -i: interactive rc file (shell aliases).
@@ -205,13 +212,18 @@ public final class ClaudeReviewRun: @unchecked Sendable {
         env["OPDIFF_REVIEW_SCHEMA"] = schema
         process.environment = env
 
-        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr
 
         lock.lock()
-        if cancelled { lock.unlock(); throw CancellationError() }
+        if cancelled {
+            lock.unlock()
+            throw CancellationError()
+        }
         self.process = process
         lock.unlock()
 

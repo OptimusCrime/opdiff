@@ -40,8 +40,10 @@ public struct Annotation: Codable, Sendable, Hashable, Identifiable {
         uid ?? "\(file):\(side.rawValue):\(startLine)-\(endLine):\(kind.rawValue):\(comment)"
     }
 
-    public init(file: String, side: AnnotationSide, startLine: Int, endLine: Int,
-                kind: AnnotationKind, comment: String, question: String? = nil, uid: String? = nil) {
+    public init(
+        file: String, side: AnnotationSide, startLine: Int, endLine: Int,
+        kind: AnnotationKind, comment: String, question: String? = nil, uid: String? = nil
+    ) {
         self.file = file
         self.side = side
         self.startLine = min(startLine, endLine)
@@ -70,15 +72,15 @@ public struct Review: Codable, Sendable {
 public enum ReviewSchema {
     /// JSON Schema passed to `claude --json-schema`; the CLI validates the reply against it.
     public static let json = """
-    {"type":"object","additionalProperties":false,"required":["summary","annotations"],\
-    "properties":{"summary":{"type":"string"},"annotations":{"type":"array","items":{\
-    "type":"object","additionalProperties":false,\
-    "required":["file","side","startLine","endLine","kind","comment"],\
-    "properties":{"file":{"type":"string"},"side":{"type":"string","enum":["new","old"]},\
-    "startLine":{"type":"integer","minimum":1},"endLine":{"type":"integer","minimum":1},\
-    "kind":{"type":"string","enum":["important","attention","info"]},\
-    "comment":{"type":"string"}}}}}}
-    """
+        {"type":"object","additionalProperties":false,"required":["summary","annotations"],\
+        "properties":{"summary":{"type":"string"},"annotations":{"type":"array","items":{\
+        "type":"object","additionalProperties":false,\
+        "required":["file","side","startLine","endLine","kind","comment"],\
+        "properties":{"file":{"type":"string"},"side":{"type":"string","enum":["new","old"]},\
+        "startLine":{"type":"integer","minimum":1},"endLine":{"type":"integer","minimum":1},\
+        "kind":{"type":"string","enum":["important","attention","info"]},\
+        "comment":{"type":"string"}}}}}}
+        """
 }
 
 // MARK: - Parsing `claude -p --output-format json`
@@ -95,7 +97,8 @@ public struct ClaudeAnswer: Sendable {
 
 /// Schema for answers to "Ask Claude about these lines".
 public enum AnswerSchema {
-    public static let json = #"{"type":"object","additionalProperties":false,"required":["answer"],"properties":{"answer":{"type":"string"}}}"#
+    public static let json =
+        #"{"type":"object","additionalProperties":false,"required":["answer"],"properties":{"answer":{"type":"string"}}}"#
 }
 
 public enum ClaudeOutput {
@@ -110,8 +113,11 @@ public enum ClaudeOutput {
         // Re-create annotations so start/end are normalised.
         var seen = Set<String>()
         let annotations = decoded.annotations
-            .map { Annotation(file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
-                              kind: $0.kind, comment: $0.comment) }
+            .map {
+                Annotation(
+                    file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
+                    kind: $0.kind, comment: $0.comment)
+            }
             .filter { seen.insert($0.id).inserted }  // identical duplicates would share an id
         return ClaudeResult(review: Review(summary: decoded.summary, annotations: annotations), costUSD: cost)
     }
@@ -162,12 +168,17 @@ public enum ClaudeOutput {
         // Noise before/after the JSON: try each line, then from the first '[' or '{'.
         let text = String(decoding: data, as: UTF8.self)
         for line in text.split(separator: "\n").reversed() {
-            if let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)), let r = result(in: json) { return r }
+            if let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)), let r = result(in: json) {
+                return r
+            }
         }
         for opener in ["[{", "{\""] {
             if let start = text.range(of: opener)?.lowerBound,
-               let json = try? JSONSerialization.jsonObject(with: Data(text[start...].utf8)),
-               let r = result(in: json) { return r }
+                let json = try? JSONSerialization.jsonObject(with: Data(text[start...].utf8)),
+                let r = result(in: json)
+            {
+                return r
+            }
         }
         return nil
     }

@@ -1,20 +1,21 @@
 import Foundation
 import XCTest
+
 @testable import DiffCore
 
 final class ReviewTests: XCTestCase {
     let reviewJSON = """
-    {"summary":"Adds b.","annotations":[
-      {"file":"src/app.swift","side":"new","startLine":3,"endLine":2,"kind":"important","comment":"Check this."}
-    ]}
-    """
+        {"summary":"Adds b.","annotations":[
+          {"file":"src/app.swift","side":"new","startLine":3,"endLine":2,"kind":"important","comment":"Check this."}
+        ]}
+        """
 
     func testParsesEventArrayWithStructuredOutput() throws {
         let output = """
-        [{"type":"system","subtype":"init"},
-         {"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.12,
-          "result":"ignored","structured_output":\(reviewJSON)}]
-        """
+            [{"type":"system","subtype":"init"},
+             {"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.12,
+              "result":"ignored","structured_output":\(reviewJSON)}]
+            """
         let result = try ClaudeOutput.parse(Data(output.utf8))
         XCTAssertEqual(result.review.summary, "Adds b.")
         XCTAssertEqual(result.costUSD, 0.12)
@@ -26,12 +27,13 @@ final class ReviewTests: XCTestCase {
     }
 
     func testParsesSingleObjectWithFencedResultAndShellNoise() throws {
-        let escaped = String(data: try JSONSerialization.data(withJSONObject: ["```json\n" + reviewJSON + "\n```"]), encoding: .utf8)!
+        let escaped = String(
+            data: try JSONSerialization.data(withJSONObject: ["```json\n" + reviewJSON + "\n```"]), encoding: .utf8)!
         let resultString = String(escaped.dropFirst().dropLast())  // the JSON string literal
         let output = """
-        Welcome to zsh!
-        {"type":"result","subtype":"success","is_error":false,"result":\(resultString)}
-        """
+            Welcome to zsh!
+            {"type":"result","subtype":"success","is_error":false,"result":\(resultString)}
+            """
         let result = try ClaudeOutput.parse(Data(output.utf8))
         XCTAssertEqual(result.review.annotations.count, 1)
     }
@@ -46,16 +48,16 @@ final class ReviewTests: XCTestCase {
 
     func testLayoutPlacesCardsOnLastVisibleLine() throws {
         let diff = """
-        diff --git a/src/app.swift b/src/app.swift
-        --- a/src/app.swift
-        +++ b/src/app.swift
-        @@ -1,4 +1,5 @@
-         let a = 1
-        -let b = 2
-        +let b = 3
-        +let c = 4
-         let d = 5
-        """
+            diff --git a/src/app.swift b/src/app.swift
+            --- a/src/app.swift
+            +++ b/src/app.swift
+            @@ -1,4 +1,5 @@
+             let a = 1
+            -let b = 2
+            +let b = 3
+            +let c = 4
+             let d = 5
+            """
         let file = try XCTUnwrap(DiffParser.parse(Data(diff.utf8)).first)
         let annotations = [
             Annotation(file: file.path, side: .new, startLine: 2, endLine: 3, kind: .attention, comment: "new"),
@@ -66,9 +68,9 @@ final class ReviewTests: XCTestCase {
         let layout = AnnotationLayout(file: file, annotations: annotations)
         let lines = file.hunks[0].lines  // ctx a, -b, +b, +c, ctx d
 
-        XCTAssertEqual(layout.marker(for: lines[1]), .info)        // deleted line, old side
-        XCTAssertEqual(layout.marker(for: lines[2]), .attention)   // new line 2
-        XCTAssertEqual(layout.marker(for: lines[3]), .important)   // new line 3: strongest wins
+        XCTAssertEqual(layout.marker(for: lines[1]), .info)  // deleted line, old side
+        XCTAssertEqual(layout.marker(for: lines[2]), .attention)  // new line 2
+        XCTAssertEqual(layout.marker(for: lines[3]), .important)  // new line 3: strongest wins
         XCTAssertEqual(layout.cards(after: lines[1]).map(\.comment), ["deleted"])
         XCTAssertEqual(layout.cards(after: lines[3]).map(\.comment), ["new"])
         // Range 3–9 is clamped to the last visible line (new 4 = "let d")
@@ -78,17 +80,18 @@ final class ReviewTests: XCTestCase {
 
     func testPromptShowsLineNumbersAndFocus() throws {
         let diff = """
-        diff --git a/x.swift b/x.swift
-        --- a/x.swift
-        +++ b/x.swift
-        @@ -10,2 +10,2 @@
-         keep
-        -old
-        +new
-        """
+            diff --git a/x.swift b/x.swift
+            --- a/x.swift
+            +++ b/x.swift
+            @@ -10,2 +10,2 @@
+             keep
+            -old
+            +new
+            """
         let files = DiffParser.parse(Data(diff.utf8))
-        let context = ReviewContext(base: "main", head: "feature", mergeBase: "abc123", includesWorkingTree: false,
-                                    commitCount: 1, focus: "error handling")
+        let context = ReviewContext(
+            base: "main", head: "feature", mergeBase: "abc123", includesWorkingTree: false,
+            commitCount: 1, focus: "error handling")
         let prompt = ReviewPrompt.build(files: files, context: context)
         XCTAssertTrue(prompt.contains("FILE: x.swift"))
         XCTAssertTrue(prompt.contains("   10    10   keep"))
@@ -104,8 +107,9 @@ final class ReviewTests: XCTestCase {
     func testCancelStopsTheRunningCommand() throws {
         // A random duration identifies our process; "#" turns the appended claude arguments into a comment.
         let duration = String(format: "%.3f", Double.random(in: 40...90))
-        let run = ClaudeReviewRun(command: "sleep \(duration) #", directory: FileManager.default.temporaryDirectory,
-                                  prompt: "hello")
+        let run = ClaudeReviewRun(
+            command: "sleep \(duration) #", directory: FileManager.default.temporaryDirectory,
+            prompt: "hello")
         let finished = expectation(description: "run returns after cancel")
         let started = Date()
         var thrown: Error?
@@ -133,29 +137,30 @@ final class ReviewTests: XCTestCase {
 
     func testResolvesAnnotationPathsAndRows() throws {
         let diff = """
-        diff --git a/old/name.swift b/src/name.swift
-        similarity index 90%
-        rename from old/name.swift
-        rename to src/name.swift
-        --- a/old/name.swift
-        +++ b/src/name.swift
-        @@ -1,2 +1,2 @@
-         keep
-        -old
-        +new
-        diff --git a/src/other.swift b/src/other.swift
-        --- a/src/other.swift
-        +++ b/src/other.swift
-        @@ -1 +1 @@
-        -a
-        +b
-        """
+            diff --git a/old/name.swift b/src/name.swift
+            similarity index 90%
+            rename from old/name.swift
+            rename to src/name.swift
+            --- a/old/name.swift
+            +++ b/src/name.swift
+            @@ -1,2 +1,2 @@
+             keep
+            -old
+            +new
+            diff --git a/src/other.swift b/src/other.swift
+            --- a/src/other.swift
+            +++ b/src/other.swift
+            @@ -1 +1 @@
+            -a
+            +b
+            """
         let files = DiffParser.parse(Data(diff.utf8))
         XCTAssertEqual(AnnotationFileResolver.resolve("src/name.swift", in: files)?.path, "src/name.swift")
         XCTAssertEqual(AnnotationFileResolver.resolve("old/name.swift", in: files)?.path, "src/name.swift")
         XCTAssertEqual(AnnotationFileResolver.resolve("./src/other.swift", in: files)?.path, "src/other.swift")
         XCTAssertEqual(AnnotationFileResolver.resolve("b/src/other.swift", in: files)?.path, "src/other.swift")
-        XCTAssertEqual(AnnotationFileResolver.resolve("/Users/me/repo/src/other.swift", in: files)?.path, "src/other.swift")
+        XCTAssertEqual(
+            AnnotationFileResolver.resolve("/Users/me/repo/src/other.swift", in: files)?.path, "src/other.swift")
         XCTAssertNil(AnnotationFileResolver.resolve("missing.swift", in: files))
 
         let file = files[0]
@@ -172,15 +177,15 @@ final class ReviewTests: XCTestCase {
 
     func testCopyTextAndReference() throws {
         let diff = """
-        diff --git a/x.swift b/x.swift
-        --- a/x.swift
-        +++ b/x.swift
-        @@ -10,3 +10,3 @@
-         keep
-        -old
-        +new
-         tail
-        """
+            diff --git a/x.swift b/x.swift
+            --- a/x.swift
+            +++ b/x.swift
+            @@ -10,3 +10,3 @@
+             keep
+            -old
+            +new
+             tail
+            """
         let file = try XCTUnwrap(DiffParser.parse(Data(diff.utf8)).first)
         let unified = file.unifiedRows  // hunk, keep, -old, +new, tail
         XCTAssertEqual(DiffCopy.text(unified[1...3], asDiff: false), "keep\nold\nnew")
