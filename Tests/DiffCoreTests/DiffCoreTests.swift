@@ -117,5 +117,16 @@ final class GitIntegrationTests: XCTestCase {
         XCTAssertEqual(wip.files[2].status, .added)
 
         XCTAssertThrowsError(try Git.compare(repo: dir, base: "nope", head: "feature", includeWorkingTree: false))
+
+        // Two commits on the same branch: same logic, commit hashes as refs.
+        let history = try Git.history(repo: dir, ref: "feature")
+        XCTAssertEqual(history.map(\.subject), ["feature work", "initial"])
+        XCTAssertEqual(history[0].sha.count, 40)
+        let range = try Git.compare(repo: dir, base: history[1].sha, head: history[0].sha, includeWorkingTree: false)
+        XCTAssertEqual(range.files.map(\.path), ["a.txt", "b.txt"])
+        XCTAssertEqual(range.commits.map(\.subject), ["feature work"])
+        // Reversed (base newer than compare): nothing to show, like GitHub.
+        let reversed = try Git.compare(repo: dir, base: history[0].sha, head: history[1].sha, includeWorkingTree: false)
+        XCTAssertTrue(reversed.files.isEmpty)
     }
 }

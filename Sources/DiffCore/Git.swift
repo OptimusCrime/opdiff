@@ -119,14 +119,22 @@ public enum Git {
             files.sort { $0.path < $1.path }
         }
 
-        let log = try string(["log", "--format=%h%x1f%an%x1f%ar%x1f%s", "\(base)..\(head)", "--"], in: repo)
-        let commits = log.split(separator: "\n").compactMap { line -> Commit? in
-            let f = line.split(separator: "\u{1f}", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 4 else { return nil }
-            return Commit(hash: f[0], subject: f[3], author: f[1], date: f[2])
-        }
-
+        let commits = try log(["\(base)..\(head)"], in: repo)
         return Comparison(files: files, commits: commits, mergeBase: mergeBase)
+    }
+
+    /// The most recent commits reachable from `ref`, newest first.
+    public static func history(repo: URL, ref: String, limit: Int = 300) throws -> [Commit] {
+        try log(["-n", String(limit), ref], in: repo)
+    }
+
+    static func log(_ revisionArgs: [String], in repo: URL) throws -> [Commit] {
+        let out = try string(["log", "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s"] + revisionArgs + ["--"], in: repo)
+        return out.split(separator: "\n").compactMap { line -> Commit? in
+            let f = line.split(separator: "\u{1f}", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 5 else { return nil }
+            return Commit(sha: f[0], hash: f[1], subject: f[4], author: f[2], date: f[3])
+        }
     }
 
     static func untrackedFiles(in repo: URL) throws -> [FileDiff] {

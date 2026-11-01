@@ -48,11 +48,14 @@ public struct FileDiff: Identifiable, Sendable {
 }
 
 public struct Commit: Identifiable, Sendable, Hashable {
+    /// Full commit hash.
+    public let sha: String
+    /// Abbreviated hash for display.
     public let hash: String
     public let subject: String
     public let author: String
     public let date: String
-    public var id: String { hash }
+    public var id: String { sha }
 }
 
 public struct Comparison: Sendable {
