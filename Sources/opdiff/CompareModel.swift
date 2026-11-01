@@ -91,6 +91,14 @@ final class CompareModel {
     private var reviewRun: ClaudeReviewRun?
     private var reviewLoadedKey: String?
 
+    /// Passed per git command; the user's global git config is left alone.
+    var diffAlgorithm: DiffAlgorithm = DiffAlgorithm(rawValue: UserDefaults.standard.string(forKey: "diffAlgorithm") ?? "") ?? .myers {
+        didSet { UserDefaults.standard.set(diffAlgorithm.rawValue, forKey: "diffAlgorithm") }
+    }
+
+    /// Lines selected by clicking (shift-click extends), for copying.
+    private(set) var lineSelection: LineSelection?
+
     private var reloadToken = 0
     private var launch: LaunchOptions?
 
@@ -103,7 +111,7 @@ final class CompareModel {
 
     /// The view re-runs `loadDiff()` whenever this changes.
     var compareKey: String {
-        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)|\(reloadToken)"
+        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)|\(diffAlgorithm.rawValue)|\(reloadToken)"
     }
 
     // MARK: Loading
@@ -152,14 +160,15 @@ final class CompareModel {
             refreshReviewForCurrentDiff()
             return
         }
-        let (base, head, uncommitted) = (base, head, effectiveUncommitted)
+        let (base, head, uncommitted, algorithm) = (base, head, effectiveUncommitted, diffAlgorithm)
         isLoading = true
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                try Git.compare(repo: repo, base: base, head: head, includeWorkingTree: uncommitted)
+                try Git.compare(repo: repo, base: base, head: head, includeWorkingTree: uncommitted, algorithm: algorithm)
             }.value
             guard !Task.isCancelled else { return }
             files = result.files.sorted(by: Self.treeOrder)
+            lineSelection = nil
             commits = result.commits
             mergeBase = result.mergeBase
             errorMessage = nil
@@ -495,5 +504,64 @@ final class CompareModel {
 
     private static func deleteReview(key: String) {
         try? FileManager.default.removeItem(at: reviewURL(key: key))
+    }
+
+    // MARK: Line selection and copying
+
+    struct LineSelection: Equatable {
+        let fileID: String
+        let split: Bool
+        var anchor: Int
+        var range: ClosedRange<Int>
+    }
+
+    func isRowSelected(fileID: String, index: Int, split: Bool) -> Bool {
+        guard let s = lineSelection, s.fileID == fileID, s.split == split else { return false }
+        return s.range.contains(index)
+    }
+
+    /// Click selects one row; shift-click extends from the anchor (like GitHub/VS Code).
+    func selectRow(fileID: String, index: Int, split: Bool, extend: Bool) {
+        if extend, var s = lineSelection, s.fileID == fileID, s.split == split {
+            s.range = min(s.anchor, index)...max(s.anchor, index)
+            lineSelection = s
+        } else if let s = lineSelection, s.fileID == fileID, s.split == split, s.range == index...index {
+            lineSelection = nil  // clicking the only selected row again deselects it
+        } else {
+            lineSelection = LineSelection(fileID: fileID, split: split, anchor: index, range: index...index)
+        }
+    }
+
+    func clearLineSelection() { lineSelection = nil }
+
+    var hasLineSelection: Bool { lineSelection != nil }
+
+    /// Copies the selected rows, or `fallback` (the right-clicked row) if it isn't part of the selection.
+    func copyLines(asDiff: Bool, fallback: (fileID: String, index: Int, split: Bool)? = nil) {
+        guard let (_, rows) = rowsToCopy(fallback: fallback) else { return }
+        Self.copyToPasteboard(DiffCopy.text(rows, asDiff: asDiff))
+    }
+
+    func copyReference(fallback: (fileID: String, index: Int, split: Bool)? = nil) {
+        guard let (file, rows) = rowsToCopy(fallback: fallback) else { return }
+        Self.copyToPasteboard(DiffCopy.reference(rows, in: file))
+    }
+
+    private func rowsToCopy(fallback: (fileID: String, index: Int, split: Bool)?) -> (FileDiff, ArraySlice<DiffRow>)? {
+        var target = lineSelection
+        if let fallback, !isRowSelected(fileID: fallback.fileID, index: fallback.index, split: fallback.split) {
+            target = LineSelection(fileID: fallback.fileID, split: fallback.split, anchor: fallback.index,
+                                   range: fallback.index...fallback.index)
+        }
+        guard let target, let file = files.first(where: { $0.id == target.fileID }) else { return nil }
+        let rows = target.split ? file.splitRows : file.unifiedRows
+        let range = target.range.clamped(to: 0...(max(rows.count - 1, 0)))
+        guard !rows.isEmpty else { return nil }
+        return (file, rows[range])
+    }
+
+    private static func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

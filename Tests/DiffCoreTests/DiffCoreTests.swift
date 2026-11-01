@@ -109,6 +109,10 @@ final class GitIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(info.branches), ["main", "feature"])
 
         let cmp = try Git.compare(repo: dir, base: "main", head: "feature", includeWorkingTree: false)
+        for algorithm in DiffAlgorithm.allCases {
+            let other = try Git.compare(repo: dir, base: "main", head: "feature", includeWorkingTree: false, algorithm: algorithm)
+            XCTAssertEqual(other.files.map(\.path), ["a.txt", "b.txt"], "\(algorithm)")
+        }
         XCTAssertEqual(cmp.files.map(\.path), ["a.txt", "b.txt"])
         XCTAssertEqual(cmp.commits.map(\.subject), ["feature work"])
 

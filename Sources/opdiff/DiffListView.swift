@@ -3,6 +3,24 @@ import DiffCore
 import SwiftUI
 
 private let mono = Font.system(size: 12, design: .monospaced)
+/// Height of a code row when wrapping is off: one line of 12pt monospaced text plus padding.
+private let fixedRowHeight: CGFloat = ceil(NSFont.monospacedSystemFont(ofSize: 12, weight: .regular).boundingRectForFont.height) + 2
+
+/// Stable, unique id for a diff row across all files (used for scrolling to it).
+struct RowKey: Hashable {
+    let fileID: String
+    let index: Int
+}
+
+/// The row keys of one file without allocating an array: ForEach's own identity, instead of
+/// an `.id()` modifier on each row (which makes SwiftUI resolve rows outside the viewport).
+struct RowKeys: RandomAccessCollection {
+    let fileID: String
+    let count: Int
+    var startIndex: Int { 0 }
+    var endIndex: Int { count }
+    subscript(i: Int) -> RowKey { RowKey(fileID: fileID, index: i) }
+}
 
 private enum Palette {
     static let addBg = Color.green.opacity(0.14)
@@ -13,6 +31,8 @@ private enum Palette {
     static let empty = Color.primary.opacity(0.04)
     static let border = Color(nsColor: .separatorColor)
     static let header = Color(nsColor: .windowBackgroundColor)
+    static let code = Color(nsColor: .textBackgroundColor)
+    static let selected = Color.accentColor.opacity(0.22)
 }
 
 /// All files in one long scroll, like GitHub's "Files changed" tab.
@@ -20,6 +40,7 @@ struct DiffListView: View {
     let model: CompareModel
     @Binding var selection: String?
     let splitView: Bool
+    let wrapLines: Bool
     let jumpRequest: JumpRequest?
     let onOpenReview: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -45,7 +66,6 @@ struct DiffListView: View {
                     }
                 }
                 .padding(16)
-                .textSelection(.enabled)
             }
             .background(Color(nsColor: .textBackgroundColor))
             .task(id: colorScheme) { await SyntaxHighlighter.shared.warmUp(dark: colorScheme == .dark) }
@@ -55,6 +75,7 @@ struct DiffListView: View {
             .onChange(of: jumpRequest) { _, request in
                 if let request { jump(to: request.annotation, proxy: proxy) }
             }
+            .onChange(of: splitView) { model.clearLineSelection() }
         }
     }
 
@@ -68,7 +89,7 @@ struct DiffListView: View {
               let file = model.files.first(where: { $0.id == fileID }) else { return }
         model.revealForJump(fileID)
         let rows = splitView ? file.splitRows : file.unifiedRows
-        let rowID = model.annotationLayout(for: file)?.rowIndex(of: annotation, in: rows).map { Self.rowID(fileID, $0) }
+        let rowID = model.annotationLayout(for: file)?.rowIndex(of: annotation, in: rows).map { RowKey(fileID: fileID, index: $0) }
         // Below the sticky file header rather than underneath it.
         let anchor = UnitPoint(x: 0, y: 0.25)
         proxy.scrollTo(fileID, anchor: .top)
@@ -82,7 +103,15 @@ struct DiffListView: View {
         }
     }
 
-    static func rowID(_ fileID: String, _ index: Int) -> String { "\(fileID)#row\(index)" }
+    private func rowActions(fileID: String, index: Int) -> RowActions {
+        let split = splitView
+        let target = (fileID: fileID, index: index, split: split)
+        return RowActions(
+            select: { extend in model.selectRow(fileID: fileID, index: index, split: split, extend: extend) },
+            copy: { asDiff in model.copyLines(asDiff: asDiff, fallback: target) },
+            copyReference: { model.copyReference(fallback: target) },
+            hasSelection: { model.hasLineSelection })
+    }
 
     private func highlightTaskID(_ file: FileDiff) -> String {
         "\(file.id)#\(file.contentHash)#\(colorScheme == .dark)#\(model.isCollapsed(file))#\(model.isLargeHidden(file))"
@@ -99,7 +128,7 @@ struct DiffListView: View {
                 NoteRow(text: "Large diff (\(file.lineCount) lines) is hidden.", action: ("Load diff", { model.expandLarge(file) }))
             } else {
                 let rows = splitView ? file.splitRows : file.unifiedRows
-                let gutter = CGFloat(max(String(file.maxLineNumber).count, 2)) * 7.5
+                let digits = max(String(file.maxLineNumber).count, 2)
                 let highlight = model.highlighted(file, dark: colorScheme == .dark)
                 let layout = model.annotationLayout(for: file)
                 let flashed = model.flashedAnnotationID
@@ -108,10 +137,13 @@ struct DiffListView: View {
                                    isFlashing: annotation.id == flashed)
                         .cardSides()
                 }
-                ForEach(rows.indices, id: \.self) { i in
-                    RowView(row: rows[i], gutter: gutter, highlight: highlight, layout: layout, flashedID: flashed)
-                        .cardSides()
-                        .id(Self.rowID(file.id, i))
+                ForEach(RowKeys(fileID: file.id, count: rows.count), id: \.self) { key in
+                    let i = key.index
+                    let content = RowContent.make(rows[i], highlight: highlight, layout: layout, flashedID: flashed,
+                                                  isSelected: model.isRowSelected(fileID: file.id, index: i, split: splitView))
+                    DiffRowView(content: content, digits: digits, wrap: wrapLines,
+                                actions: rowActions(fileID: file.id, index: i))
+                        .equatable()
                 }
             }
         }
@@ -268,140 +300,207 @@ private struct NoteRow: View {
     }
 }
 
-private struct RowView: View {
-    let row: DiffRow
-    let gutter: CGFloat
-    let highlight: HighlightedFile?
-    let layout: AnnotationLayout?
+// MARK: - Rows
+//
+// Performance notes (see VS Code / GitHub diff rendering):
+// - Each row gets plain values (RowContent) and is Equatable, so SwiftUI skips rows whose
+//   content didn't change instead of diffing a large view tree.
+// - Few views per row: one Text for the gutter, one Text for marker + code, and
+//   backgrounds instead of overlays.
+// - No `.textSelection`: rows are selected by clicking and copied with ⇧⌘C / context menu.
+// - With wrapping off every code row has the same height, so lazy-stack estimates (and
+//   therefore scrolling and jumps) are exact.
+
+/// Everything a diff row needs to render, as values.
+struct RowContent: Equatable {
+    struct Cell: Equatable {
+        let line: DiffLine
+        let number: Int?
+        let highlighted: AttributedString?
+        let marker: AnnotationKind?
+    }
+
+    enum Body: Equatable {
+        case hunk(String)
+        case note(String)
+        case unified(DiffLine, AttributedString?, AnnotationKind?)
+        case split(Cell?, Cell?)
+    }
+
+    let body: Body
+    let cards: [Annotation]
+    /// Only set when one of this row's cards is flashing, so other rows stay equal.
     let flashedID: String?
+    let isSelected: Bool
+
+    static func make(_ row: DiffRow, highlight: HighlightedFile?, layout: AnnotationLayout?,
+                     flashedID: String?, isSelected: Bool) -> RowContent {
+        var cards: [Annotation] = []
+        let body: Body
+        switch row {
+        case .hunk(let header):
+            body = .hunk(header)
+        case .line(let line):
+            if line.kind == .noNewline {
+                body = .note(line.text)
+            } else {
+                body = .unified(line, highlight?.text(for: line), layout?.marker(for: line))
+                cards = layout?.cards(after: line) ?? []
+            }
+        case .pair(let old, let new):
+            if let line = old ?? new, line.kind == .noNewline {
+                body = .note(line.text)
+            } else {
+                let left = old.map { Cell(line: $0, number: $0.oldNumber,
+                                          highlighted: highlight?.old[$0.oldNumber ?? -1],
+                                          marker: layout?.markers[.old]?[$0.oldNumber ?? -1]) }
+                let right = new.map { Cell(line: $0, number: $0.newNumber,
+                                           highlighted: highlight?.new[$0.newNumber ?? -1],
+                                           marker: layout?.markers[.new]?[$0.newNumber ?? -1]) }
+                body = .split(left, right)
+                var seen = Set<String>()
+                cards = [old, new].compactMap { $0 }.flatMap { layout?.cards(after: $0) ?? [] }
+                    .filter { seen.insert($0.id).inserted }
+            }
+        }
+        let flash = flashedID.flatMap { id in cards.contains { $0.id == id } ? id : nil }
+        return RowContent(body: body, cards: cards, flashedID: flash, isSelected: isSelected)
+    }
+}
+
+struct RowActions {
+    let select: (_ extend: Bool) -> Void
+    let copy: (_ asDiff: Bool) -> Void
+    let copyReference: () -> Void
+    let hasSelection: () -> Bool
+}
+
+private struct DiffRowView: View, Equatable {
+    let content: RowContent
+    let digits: Int
+    let wrap: Bool
+    let actions: RowActions
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.content == b.content && a.digits == b.digits && a.wrap == b.wrap
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            content
-            ForEach(cards) { AnnotationCard(annotation: $0, isFlashing: $0.id == flashedID) }
+            if wrap {
+                line
+            } else {
+                // Fixed height: the lazy stack never has to measure the text.
+                line.frame(minWidth: 0, maxWidth: .infinity, minHeight: fixedRowHeight, maxHeight: fixedRowHeight,
+                           alignment: .topLeading)
+            }
+            ForEach(content.cards) { card in
+                AnnotationCard(annotation: card, isFlashing: card.id == content.flashedID)
+                    .textSelection(.enabled)
+            }
         }
-    }
-
-    /// Comments shown under this row (once per annotation, even if both sides match).
-    private var cards: [Annotation] {
-        guard let layout else { return [] }
-        var lines: [DiffLine] = []
-        switch row {
-        case .hunk: return []
-        case .line(let line): lines = [line]
-        case .pair(let old, let new): lines = [old, new].compactMap { $0 }
-        }
-        var seen = Set<String>()
-        return lines.flatMap { layout.cards(after: $0) }.filter { seen.insert($0.id).inserted }
+        .cardSides()
     }
 
     @ViewBuilder
-    private var content: some View {
-        switch row {
+    private var line: some View {
+        switch content.body {
         case .hunk(let header):
             Text(header)
                 .font(mono)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
                 .padding(.vertical, 4).padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.hunk)
-        case .line(let line):
-            UnifiedLine(line: line, gutter: gutter, highlighted: highlight?.text(for: line))
-                .modifier(AnnotationMarker(kind: layout?.marker(for: line)))
-        case .pair(let old, let new):
-            HStack(spacing: 0) {
-                SplitCell(line: old, number: old?.oldNumber, gutter: gutter,
-                          highlighted: old.flatMap { highlight?.old[$0.oldNumber ?? -1] })
-                    .modifier(AnnotationMarker(kind: old.flatMap { layout?.markers[.old]?[$0.oldNumber ?? -1] }))
-                Rectangle().fill(Palette.border).frame(width: 1)
-                SplitCell(line: new, number: new?.newNumber, gutter: gutter,
-                          highlighted: new.flatMap { highlight?.new[$0.newNumber ?? -1] })
-                    .modifier(AnnotationMarker(kind: new.flatMap { layout?.markers[.new]?[$0.newNumber ?? -1] }))
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-private struct UnifiedLine: View {
-    let line: DiffLine
-    let gutter: CGFloat
-    let highlighted: AttributedString?
-
-    var body: some View {
-        if line.kind == .noNewline {
-            Text(line.text).font(mono.italic()).foregroundStyle(.secondary)
-                .padding(.leading, gutter * 2 + 40).padding(.vertical, 1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            HStack(alignment: .top, spacing: 0) {
-                LineNumber(number: line.oldNumber, width: gutter, background: line.kind.gutterColor)
-                LineNumber(number: line.newNumber, width: gutter, background: line.kind.gutterColor)
-                CodeText(line: line, highlighted: highlighted)
-            }
-            .background(line.kind.background)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-private struct SplitCell: View {
-    let line: DiffLine?
-    let number: Int?
-    let gutter: CGFloat
-    let highlighted: AttributedString?
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if let line {
-                LineNumber(number: number, width: gutter, background: line.kind.gutterColor)
-                CodeText(line: line, highlighted: highlighted)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(line?.kind.background ?? Palette.empty)
-    }
-}
-
-private struct LineNumber: View {
-    let number: Int?
-    let width: CGFloat
-    let background: Color
-
-    var body: some View {
-        Text(number.map(String.init) ?? "")
-            .font(mono)
-            .foregroundStyle(.secondary)
-            .frame(width: width, alignment: .trailing)
-            .padding(.horizontal, 8).padding(.vertical, 1)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .background(background)
-            .textSelection(.disabled)
-    }
-}
-
-private struct CodeText: View {
-    let line: DiffLine
-    var highlighted: AttributedString?
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Text(line.kind.marker)
-                .frame(width: 18)
+        case .note(let text):
+            Text(text)
+                .font(mono.italic())
                 .foregroundStyle(.secondary)
-                .textSelection(.disabled)
-            Group {
-                if let highlighted, !highlighted.characters.isEmpty {
-                    Text(highlighted)
-                } else {
-                    Text(line.text.isEmpty ? " " : SyntaxHighlighter.displayText(line.text))
-                }
+                .padding(.leading, CGFloat(digits * 2 + 6) * 7.2).padding(.vertical, 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .unified(let line, let highlighted, let marker):
+            HStack(alignment: .top, spacing: 0) {
+                gutter(Self.pad(line.oldNumber, digits) + "  " + Self.pad(line.newNumber, digits),
+                       kind: line.kind, marker: marker)
+                code(line, highlighted)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(content.isSelected ? Palette.selected : line.kind.background)
+            .interactive(actions)
+        case .split(let left, let right):
+            HStack(alignment: .top, spacing: 0) {
+                splitCell(left)
+                Palette.border.frame(width: 1)
+                splitCell(right)
+            }
+            // Equal-height halves when wrapping; with fixed rows the frame above sets the height.
+            .fixedSize(horizontal: false, vertical: wrap)
+            .background(content.isSelected ? Palette.selected : .clear)
+            .interactive(actions)
         }
-        .font(mono)
-        .padding(.vertical, 1)
-        .padding(.trailing, 8)
+    }
+
+    @ViewBuilder
+    private func splitCell(_ cell: RowContent.Cell?) -> some View {
+        if let cell {
+            HStack(alignment: .top, spacing: 0) {
+                gutter(Self.pad(cell.number, digits), kind: cell.line.kind, marker: cell.marker)
+                code(cell.line, cell.highlighted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(content.isSelected ? .clear : cell.line.kind.background)
+        } else {
+            Palette.empty.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Line numbers in one Text. A commented line gets its gutter tinted in the comment colour.
+    private func gutter(_ numbers: String, kind: LineKind, marker: AnnotationKind?) -> some View {
+        Text("  " + numbers + " ")
+            .font(mono)
+            .foregroundStyle(marker == nil ? Color.secondary : Color.primary)
+            .padding(.vertical, 1)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(marker.map { $0.color.opacity(0.55) } ?? kind.gutterColor)
+    }
+
+    /// Marker and code in a single Text.
+    private func code(_ line: DiffLine, _ highlighted: AttributedString?) -> some View {
+        let marker = Text(line.kind.marker + " ").foregroundStyle(.secondary)
+        let body: Text
+        if let highlighted, !highlighted.characters.isEmpty {
+            body = Text(highlighted)
+        } else {
+            body = Text(line.text.isEmpty ? " " : SyntaxHighlighter.displayText(line.text))
+        }
+        let text = Text("\(marker)\(body)").font(mono)
+        return Group {
+            if wrap {
+                text
+            } else {
+                text.lineLimit(1)
+            }
+        }
+        .padding(.leading, 4).padding(.trailing, 8).padding(.vertical, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func pad(_ number: Int?, _ width: Int) -> String {
+        let s = number.map(String.init) ?? ""
+        return String(repeating: " ", count: max(0, width - s.count)) + s
+    }
+}
+
+private extension View {
+    /// Click to select (shift-click extends); right-click to copy.
+    func interactive(_ actions: RowActions) -> some View {
+        contentShape(Rectangle())
+            .onTapGesture { actions.select(NSEvent.modifierFlags.contains(.shift)) }
+            .contextMenu {
+                Button(actions.hasSelection() ? "Copy Selected Lines" : "Copy Line") { actions.copy(false) }
+                Button("Copy as Diff") { actions.copy(true) }
+                Button("Copy Reference (path:line)") { actions.copyReference() }
+            }
     }
 }
 
@@ -432,9 +531,12 @@ private extension LineKind {
 }
 
 extension View {
-    /// Left/right borders so consecutive rows read as one card per file.
+    /// Left/right borders so consecutive rows read as one card per file. Backgrounds rather
+    /// than overlays: cheaper per row.
     func cardSides() -> some View {
-        overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 1) }
-            .overlay(alignment: .trailing) { Rectangle().fill(Palette.border).frame(width: 1) }
+        background(Palette.code)
+            .padding(.horizontal, 1)
+            .background(Palette.border)
     }
 }
+

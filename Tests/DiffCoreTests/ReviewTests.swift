@@ -169,4 +169,27 @@ final class ReviewTests: XCTestCase {
         XCTAssertEqual(layout.rowIndex(of: onNew, in: file.splitRows), 2)
         XCTAssertEqual(layout.rowIndex(of: onOld, in: file.splitRows), 2)
     }
+
+    func testCopyTextAndReference() throws {
+        let diff = """
+        diff --git a/x.swift b/x.swift
+        --- a/x.swift
+        +++ b/x.swift
+        @@ -10,3 +10,3 @@
+         keep
+        -old
+        +new
+         tail
+        """
+        let file = try XCTUnwrap(DiffParser.parse(Data(diff.utf8)).first)
+        let unified = file.unifiedRows  // hunk, keep, -old, +new, tail
+        XCTAssertEqual(DiffCopy.text(unified[1...3], asDiff: false), "keep\nold\nnew")
+        XCTAssertEqual(DiffCopy.text(unified[0...3], asDiff: true), "@@ -10,3 +10,3 @@\n keep\n-old\n+new")
+        XCTAssertEqual(DiffCopy.reference(unified[1...4], in: file), "x.swift:10-12")
+        XCTAssertEqual(DiffCopy.reference(unified[2...2], in: file), "x.swift:11")  // deleted line: old number
+
+        let split = file.splitRows  // hunk, (keep|keep), (old|new), (tail|tail)
+        XCTAssertEqual(DiffCopy.text(split[1...2], asDiff: false), "keep\nnew")
+        XCTAssertEqual(DiffCopy.text(split[1...2], asDiff: true), " keep\n-old\n+new")
+    }
 }

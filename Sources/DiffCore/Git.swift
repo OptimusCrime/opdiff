@@ -1,5 +1,25 @@
 import Foundation
 
+/// Diff algorithm passed per command (`--diff-algorithm`), so the user's global git
+/// config is never changed. `.gitConfig` leaves it to their config.
+public enum DiffAlgorithm: String, CaseIterable, Sendable, Identifiable {
+    case myers, minimal, patience, histogram, gitConfig
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .myers: "Myers (fastest, git's default)"
+        case .minimal: "Minimal"
+        case .patience: "Patience"
+        case .histogram: "Histogram"
+        case .gitConfig: "Use my git config"
+        }
+    }
+
+    var arguments: [String] { self == .gitConfig ? [] : ["--diff-algorithm=\(rawValue)"] }
+}
+
 public struct GitError: LocalizedError, Sendable {
     public let message: String
     public var errorDescription: String? { message }
@@ -101,7 +121,8 @@ public enum Git {
     /// Same semantics as GitHub's compare view (`base...head`): changes on `head`
     /// since it diverged from `base`. With `includeWorkingTree`, `head` must be the
     /// checked-out branch, and staged, unstaged and untracked changes are included.
-    public static func compare(repo: URL, base: String, head: String, includeWorkingTree: Bool) throws -> Comparison {
+    public static func compare(repo: URL, base: String, head: String, includeWorkingTree: Bool,
+                               algorithm: DiffAlgorithm = .gitConfig) throws -> Comparison {
         for ref in [base, head] {
             guard (try? run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], in: repo)) != nil else {
                 throw GitError(message: "Unknown branch or revision: \(ref)")
@@ -109,7 +130,7 @@ public enum Git {
         }
 
         let mergeBase = (try? string(["merge-base", base, head], in: repo)).flatMap { $0.isEmpty ? nil : $0 }
-        var diffArgs = ["diff"] + diffFlags + ["--find-renames", mergeBase ?? base]
+        var diffArgs = ["diff"] + diffFlags + algorithm.arguments + ["--find-renames", mergeBase ?? base]
         if !includeWorkingTree { diffArgs.append(head) }
         diffArgs.append("--")
 

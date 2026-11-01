@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showReview = false
     @State private var jumpRequest: JumpRequest?
     @AppStorage("splitView") private var splitView = false
+    @AppStorage("wrapLines") private var wrapLines = true
 
     var body: some View {
         Group {
@@ -21,7 +22,7 @@ struct ContentView: View {
                         .searchable(text: $filter, placement: .sidebar, prompt: "Filter files")
                         .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 520)
                 } detail: {
-                    DiffListView(model: model, selection: $selection, splitView: splitView,
+                    DiffListView(model: model, selection: $selection, splitView: splitView, wrapLines: wrapLines,
                                  jumpRequest: jumpRequest) {
                         showReview = true
                     }
