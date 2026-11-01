@@ -6,9 +6,9 @@ A small native macOS app for reviewing the diff between two branches before open
 
 - Pick **base** and **compare** branches (searchable; you can also type any ref: tag, SHA, `HEAD~3`)
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
-- All changed files in one scroll with sticky headers, plus a file sidebar
+- All changed files in one scroll with sticky headers, plus a collapsible folder tree
 - Unified or split view, "Viewed" checkboxes, commit list, renames/binary/new/deleted files
-- Optional **Include uncommitted**: adds staged, unstaged and untracked work (when `compare` is the checked-out branch) — useful for reviewing what an AI agent just did before committing
+- **Include uncommitted** (on by default): adds staged, unstaged and untracked work (when `compare` is the checked-out branch) — useful for reviewing what an AI agent just did before committing
 
 Requires macOS 14+ and Xcode / Command Line Tools.
 
@@ -27,7 +27,7 @@ From inside any repository:
 opdiff                 # current branch vs. default base (origin/HEAD, else main/master)
 opdiff main            # current branch vs. main
 opdiff main feature/x  # feature/x vs. main
-opdiff -u              # include uncommitted + untracked changes
+opdiff -c              # committed changes only
 ```
 
 `git opdiff …` works too (installed as a `git-opdiff` link; git runs any `git-<name>` on your PATH as `git <name>`).
@@ -35,6 +35,14 @@ opdiff -u              # include uncommitted + untracked changes
 Claude Code (or any agent) can open it the same way — e.g. ask *"open the diff against main in opdiff"* and it will run `opdiff main`.
 
 You can also launch the app directly and use **File → Open Repository… (⌘O)**, drop a folder on the window, or pick a recent repo. **⌘R** refreshes, **⇧⌘S** swaps base/compare.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| ⌘O | Open repository |
+| ⌘R | Refresh |
+| ⇧⌘S | Swap base and compare |
 
 ## Development
 

@@ -4,7 +4,8 @@
 #   opdiff                     compare current branch against the default base (origin/HEAD, main, …)
 #   opdiff <base>              compare current branch against <base>
 #   opdiff <base> <head>       compare <head> against <base>
-#   opdiff -u [base]           also include uncommitted + untracked changes
+#   opdiff -c [base]           committed changes only (uncommitted + untracked
+#                              work is included by default)
 #
 # Also installed as git-opdiff, so `git opdiff ...` works too.
 set -euo pipefail
@@ -13,8 +14,9 @@ args=()
 positional=()
 for arg in "$@"; do
   case "$arg" in
-    -u|--uncommitted) args+=(--uncommitted) ;;
-    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -c|--committed-only) args+=(--committed-only) ;;
+    -u|--uncommitted) ;;  # default now; kept for compatibility
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) positional+=("$arg") ;;
   esac
 done

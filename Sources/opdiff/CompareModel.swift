@@ -3,12 +3,12 @@ import DiffCore
 import SwiftUI
 
 /// Values passed on the command line, e.g. by `opdiff`:
-///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--uncommitted]
+///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--committed-only]
 struct LaunchOptions {
     var repo: URL?
     var base: String?
     var head: String?
-    var uncommitted = false
+    var uncommitted = true
     var explicitRepo = false
 
     static func parse(_ args: [String]) -> LaunchOptions {
@@ -21,6 +21,7 @@ struct LaunchOptions {
             case "--base": if let v = value { o.base = v; i += 1 }
             case "--head", "--compare": if let v = value { o.head = v; i += 1 }
             case "--uncommitted", "-u": o.uncommitted = true
+            case "--committed-only", "-c": o.uncommitted = false
             default: break
             }
             i += 1
@@ -39,7 +40,7 @@ final class CompareModel {
     private(set) var currentBranch: String?
     var base = ""
     var head = ""
-    var includeUncommitted = false
+    var includeUncommitted = true
 
     private(set) var files: [FileDiff] = []
     private(set) var commits: [Commit] = []
@@ -102,7 +103,7 @@ final class CompareModel {
                 try Git.compare(repo: repo, base: base, head: head, includeWorkingTree: uncommitted)
             }.value
             guard !Task.isCancelled else { return }
-            files = result.files
+            files = result.files.sorted(by: Self.treeOrder)
             commits = result.commits
             mergeBase = result.mergeBase
             errorMessage = nil
@@ -112,6 +113,17 @@ final class CompareModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Same order as the sidebar tree: folders before files at each level, then natural sort.
+    static func treeOrder(_ a: FileDiff, _ b: FileDiff) -> Bool {
+        let ac = a.path.split(separator: "/"), bc = b.path.split(separator: "/")
+        for i in 0..<min(ac.count, bc.count) where ac[i] != bc[i] {
+            let aIsDir = i < ac.count - 1, bIsDir = i < bc.count - 1
+            if aIsDir != bIsDir { return aIsDir }
+            return String(ac[i]).localizedStandardCompare(String(bc[i])) == .orderedAscending
+        }
+        return ac.count < bc.count
     }
 
     func refresh() {
