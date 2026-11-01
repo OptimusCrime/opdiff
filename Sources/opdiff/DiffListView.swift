@@ -20,6 +20,7 @@ struct DiffListView: View {
     let model: CompareModel
     @Binding var selection: String?
     let splitView: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -30,7 +31,13 @@ struct DiffListView: View {
                         Section {
                             fileBody(file)
                         } header: {
-                            FileHeader(file: file, model: model).id(file.id)
+                            FileHeader(file: file, model: model)
+                                .id(file.id)
+                                // Highlight lazily: the header appears when the file scrolls into view.
+                                .task(id: highlightTaskID(file)) {
+                                    guard !model.isCollapsed(file), !model.isLargeHidden(file) else { return }
+                                    await model.ensureHighlighted(file, dark: colorScheme == .dark)
+                                }
                         }
                     }
                 }
@@ -38,10 +45,15 @@ struct DiffListView: View {
                 .textSelection(.enabled)
             }
             .background(Color(nsColor: .textBackgroundColor))
+            .task(id: colorScheme) { await SyntaxHighlighter.shared.warmUp(dark: colorScheme == .dark) }
             .onChange(of: selection) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
             }
         }
+    }
+
+    private func highlightTaskID(_ file: FileDiff) -> String {
+        "\(file.id)#\(file.contentHash)#\(colorScheme == .dark)#\(model.isCollapsed(file))#\(model.isLargeHidden(file))"
     }
 
     @ViewBuilder
@@ -56,8 +68,9 @@ struct DiffListView: View {
             } else {
                 let rows = splitView ? file.splitRows : file.unifiedRows
                 let gutter = CGFloat(max(String(file.maxLineNumber).count, 2)) * 7.5
+                let highlight = model.highlighted(file, dark: colorScheme == .dark)
                 ForEach(rows.indices, id: \.self) { i in
-                    RowView(row: rows[i], gutter: gutter).cardSides()
+                    RowView(row: rows[i], gutter: gutter, highlight: highlight).cardSides()
                 }
             }
         }
@@ -198,6 +211,7 @@ private struct NoteRow: View {
 private struct RowView: View {
     let row: DiffRow
     let gutter: CGFloat
+    let highlight: HighlightedFile?
 
     var body: some View {
         switch row {
@@ -209,12 +223,14 @@ private struct RowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.hunk)
         case .line(let line):
-            UnifiedLine(line: line, gutter: gutter)
+            UnifiedLine(line: line, gutter: gutter, highlighted: highlight?.text(for: line))
         case .pair(let old, let new):
             HStack(spacing: 0) {
-                SplitCell(line: old, number: old?.oldNumber, gutter: gutter)
+                SplitCell(line: old, number: old?.oldNumber, gutter: gutter,
+                          highlighted: old.flatMap { highlight?.old[$0.oldNumber ?? -1] })
                 Rectangle().fill(Palette.border).frame(width: 1)
-                SplitCell(line: new, number: new?.newNumber, gutter: gutter)
+                SplitCell(line: new, number: new?.newNumber, gutter: gutter,
+                          highlighted: new.flatMap { highlight?.new[$0.newNumber ?? -1] })
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -224,6 +240,7 @@ private struct RowView: View {
 private struct UnifiedLine: View {
     let line: DiffLine
     let gutter: CGFloat
+    let highlighted: AttributedString?
 
     var body: some View {
         if line.kind == .noNewline {
@@ -234,7 +251,7 @@ private struct UnifiedLine: View {
             HStack(alignment: .top, spacing: 0) {
                 LineNumber(number: line.oldNumber, width: gutter, background: line.kind.gutterColor)
                 LineNumber(number: line.newNumber, width: gutter, background: line.kind.gutterColor)
-                CodeText(line: line)
+                CodeText(line: line, highlighted: highlighted)
             }
             .background(line.kind.background)
             .fixedSize(horizontal: false, vertical: true)
@@ -246,12 +263,13 @@ private struct SplitCell: View {
     let line: DiffLine?
     let number: Int?
     let gutter: CGFloat
+    let highlighted: AttributedString?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             if let line {
                 LineNumber(number: number, width: gutter, background: line.kind.gutterColor)
-                CodeText(line: line)
+                CodeText(line: line, highlighted: highlighted)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -278,6 +296,7 @@ private struct LineNumber: View {
 
 private struct CodeText: View {
     let line: DiffLine
+    var highlighted: AttributedString?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -285,8 +304,14 @@ private struct CodeText: View {
                 .frame(width: 18)
                 .foregroundStyle(.secondary)
                 .textSelection(.disabled)
-            Text(line.text.isEmpty ? " " : line.text.replacingOccurrences(of: "\t", with: "    "))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if let highlighted, !highlighted.characters.isEmpty {
+                    Text(highlighted)
+                } else {
+                    Text(line.text.isEmpty ? " " : SyntaxHighlighter.displayText(line.text))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(mono)
         .padding(.vertical, 1)

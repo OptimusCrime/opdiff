@@ -8,6 +8,7 @@ A small native macOS app for reviewing the diff between two branches before open
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
 - All changed files in one scroll with sticky headers, plus a collapsible folder tree
 - Unified or split view, "Viewed" checkboxes, commit list, renames/binary/new/deleted files
+- Syntax highlighting for ~190 languages (GitHub light/dark themes), done lazily as files scroll into view
 - **Include uncommitted** (on by default): adds staged, unstaged and untracked work (when `compare` is the checked-out branch) — useful for reviewing what an AI agent just did before committing
 
 Requires macOS 14+ and Xcode / Command Line Tools.
@@ -54,3 +55,5 @@ make test                  # parser + git integration tests
 - `Sources/DiffCore` — git invocation and unified-diff parsing (no UI, tested)
 - `Sources/opdiff` — SwiftUI app
 - `scripts/` — `.app` bundling script and the `opdiff` command-line launcher
+
+Syntax highlighting is provided by [HighlighterSwift](https://github.com/smittytone/HighlighterSwift) (MIT), which bundles [highlight.js](https://highlightjs.org) (BSD-3-Clause).

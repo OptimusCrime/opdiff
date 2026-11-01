@@ -9,7 +9,9 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if model.repo == nil {
+            if model.repo == nil, model.isOpening {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.repo == nil {
                 WelcomeView(model: model)
             } else {
                 NavigationSplitView {

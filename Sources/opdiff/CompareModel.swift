@@ -53,6 +53,12 @@ final class CompareModel {
     private(set) var expandedLarge: Set<String> = []
     private(set) var recentRepos: [String] = UserDefaults.standard.stringArray(forKey: "recentRepos") ?? []
 
+    /// Syntax highlighting results, filled lazily as files scroll into view.
+    private(set) var highlights: [String: HighlightedFile] = [:]
+
+    /// True while a repository passed on the command line is being opened.
+    private(set) var isOpening = false
+
     private var reloadToken = 0
     private var launch: LaunchOptions?
 
@@ -75,7 +81,9 @@ final class CompareModel {
         launch = nil
         guard let url = options.repo else { return }
         includeUncommitted = options.uncommitted
+        isOpening = true
         await openRepository(url, base: options.base, head: options.head, reportErrors: options.explicitRepo)
+        isOpening = false
     }
 
     func openRepository(_ url: URL, base: String? = nil, head: String? = nil, reportErrors: Bool = true) async {
@@ -86,7 +94,7 @@ final class CompareModel {
             currentBranch = info.currentBranch
             self.head = head ?? info.currentBranch ?? info.branches.first ?? ""
             self.base = base ?? info.defaultBase ?? ""
-            files = []; commits = []; collapsed = []; viewed = []; expandedLarge = []
+            files = []; commits = []; collapsed = []; viewed = []; expandedLarge = []; highlights = [:]
             errorMessage = nil
             addRecent(info.root.path)
         } catch {
@@ -175,6 +183,19 @@ final class CompareModel {
 
     func toggleCollapsed(_ f: FileDiff) {
         if collapsed.contains(f.id) { collapsed.remove(f.id) } else { collapsed.insert(f.id) }
+    }
+
+    // MARK: Syntax highlighting
+
+    private func highlightKey(_ f: FileDiff, dark: Bool) -> String { "\(f.id)#\(f.contentHash)#\(dark)" }
+
+    func highlighted(_ f: FileDiff, dark: Bool) -> HighlightedFile? { highlights[highlightKey(f, dark: dark)] }
+
+    func ensureHighlighted(_ f: FileDiff, dark: Bool) async {
+        let key = highlightKey(f, dark: dark)
+        guard highlights[key] == nil else { return }
+        guard let result = await SyntaxHighlighter.shared.highlight(f, dark: dark), !Task.isCancelled else { return }
+        highlights[key] = result
     }
 
     func expandLarge(_ f: FileDiff) { expandedLarge.insert(f.id) }
