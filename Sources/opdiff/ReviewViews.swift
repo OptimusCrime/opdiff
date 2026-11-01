@@ -225,12 +225,25 @@ struct ReviewPanel: View {
 
 struct ReviewInspector: View {
     let model: CompareModel
+    let onClose: () -> Void
     let onJump: (Annotation) -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Label("Claude Review", systemImage: "sparkles").font(.title3.bold())
+                HStack(alignment: .firstTextBaseline) {
+                    Label("Claude Review", systemImage: "sparkles").font(.title3.bold())
+                    Spacer()
+                    if model.storedReview != nil {
+                        clearButton
+                    }
+                    Button(action: onClose) {
+                        Image(systemName: "xmark").font(.body.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Close the review panel")
+                }
                 status
                 if let stored = model.storedReview {
                     review(stored)
@@ -343,9 +356,14 @@ struct ReviewInspector: View {
                 }
             }
 
-            Button("Clear Review", role: .destructive) { model.clearReview() }
-                .buttonStyle(.link)
+            clearButton
         }
+    }
+
+    private var clearButton: some View {
+        Button("Clear Review", role: .destructive) { model.clearReview() }
+            .buttonStyle(.link)
+            .help("Remove this review and its comments from the diff")
     }
 
     private func commentRow(_ annotation: Annotation) -> some View {

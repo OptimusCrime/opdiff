@@ -33,7 +33,9 @@ struct ContentView: View {
                         }
                         if showReview {
                             PaneDivider(width: $reviewPaneWidth)
-                            ReviewInspector(model: model) { annotation in jumpRequest = JumpRequest(annotation: annotation) }
+                            ReviewInspector(model: model, onClose: { showReview = false }) { annotation in
+                                jumpRequest = JumpRequest(annotation: annotation)
+                            }
                                 .frame(width: reviewPaneWidth)
                                 .background(Color(nsColor: .windowBackgroundColor))
                         }
