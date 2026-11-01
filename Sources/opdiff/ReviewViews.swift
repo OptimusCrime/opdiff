@@ -7,6 +7,7 @@ extension AnnotationKind {
         case .important: .orange
         case .attention: .yellow
         case .info: .blue
+        case .question: .purple
         }
     }
 
@@ -15,6 +16,7 @@ extension AnnotationKind {
         case .important: "exclamationmark.triangle.fill"
         case .attention: "eye.fill"
         case .info: "info.circle.fill"
+        case .question: "questionmark.bubble.fill"
         }
     }
 
@@ -23,6 +25,7 @@ extension AnnotationKind {
         case .important: "Important"
         case .attention: "Attention"
         case .info: "Info"
+        case .question: "Question"
         }
     }
 }
@@ -299,7 +302,8 @@ struct ReviewPanel: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
                             Label("Claude review", systemImage: "sparkles").font(.headline)
-                            KindCounts(annotations: stored.review.annotations)
+                            KindCounts(annotations: stored.review.annotations.filter { !model.isResolved($0) },
+                                       resolved: model.resolvedCount)
                             Spacer()
                             Button("Open Review Panel", action: onOpenReview).buttonStyle(.link)
                         }
@@ -347,9 +351,12 @@ struct ReviewInspector: View {
                     ContentUnavailableView {
                         Label("No review yet", systemImage: "sparkles")
                     } description: {
-                        Text("Click **Ask Claude** in the toolbar to have Claude point out the lines in this diff that deserve attention.")
+                        Text("Click **Ask Claude** in the toolbar to have Claude point out the lines in this diff that deserve attention.\n\nTo ask about specific lines, select them and press **A** (or right-click them).")
                     }
                     .padding(.top, 24)
+                }
+                if !model.questions.isEmpty {
+                    questions
                 }
             }
             .padding(16)
@@ -392,13 +399,65 @@ struct ReviewInspector: View {
         }
     }
 
+    private var questions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Your questions (\(model.questions.count))").font(.headline)
+            ForEach(Array(model.questions.enumerated()), id: \.offset) { _, question in
+                let inDiff = model.fileID(for: question) != nil
+                HStack(alignment: .top, spacing: 6) {
+                    Button { onJump(question) } label: { questionRow(question) }
+                        .buttonStyle(.plain)
+                        .disabled(!inDiff)
+                        .opacity(inDiff ? 1 : 0.5)
+                        .help(inDiff ? "Show this question in the diff" : "This file isn't part of the current diff")
+                    Button { model.removeQuestion(question) } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Remove this question")
+                        .padding(.top, 8)
+                }
+            }
+        }
+    }
+
+    private func questionRow(_ question: Annotation) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: AnnotationKind.question.icon).foregroundStyle(AnnotationKind.question.color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(question.file) · \(question.lineLabel)")
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.head)
+                Text(question.question ?? "").font(.callout.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.isPending(question) {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("Claude is thinking…").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(AnnotationCard.markdown(question.comment.isEmpty ? "No answer." : question.comment))
+                        .font(.callout)
+                        .lineLimit(6)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(AnnotationKind.question.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+    }
+
     private func review(_ stored: CompareModel.StoredReview) -> some View {
-        let annotations = stored.review.annotations
+        let all = stored.review.annotations
+        let annotations = all.filter { !(model.hideResolved && model.isResolved($0)) }
         let byFile = Dictionary(grouping: annotations, by: \.file)
         let files = byFile.keys.sorted()
         return VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                KindCounts(annotations: annotations)
+                KindCounts(annotations: all.filter { !model.isResolved($0) }, resolved: model.resolvedCount)
                 Text("\(stored.command) · \(stored.createdAt.formatted(date: .abbreviated, time: .shortened))"
                      + (stored.costUSD.map { String(format: " · $%.2f", $0) } ?? ""))
                     .font(.caption).foregroundStyle(.secondary)
@@ -420,9 +479,17 @@ struct ReviewInspector: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !annotations.isEmpty {
+            if !all.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Comments (\(annotations.count))").font(.headline)
+                    HStack {
+                        Text("Comments (\(annotations.count))").font(.headline)
+                        Spacer()
+                        Toggle("Hide resolved", isOn: Binding(get: { model.hideResolved },
+                                                              set: { model.hideResolved = $0 }))
+                            .toggleStyle(.checkbox)
+                            .font(.caption)
+                            .disabled(model.resolvedCount == 0 && !model.hideResolved)
+                    }
                     ForEach(files, id: \.self) { file in
                         let fileAnnotations = byFile[file]!.sorted { $0.startLine < $1.startLine }
                         let inDiff = model.fileID(for: fileAnnotations[0]) != nil
@@ -441,11 +508,21 @@ struct ReviewInspector: View {
                             .help(inDiff ? "Jump to \(file)" : "This file isn't part of the current diff")
                             // Index-based identity: robust even if two comments are identical.
                             ForEach(Array(fileAnnotations.enumerated()), id: \.offset) { _, annotation in
-                                Button { onJump(annotation) } label: { commentRow(annotation) }
-                                    .buttonStyle(.plain)
-                                    .disabled(!inDiff)
-                                    .opacity(inDiff ? 1 : 0.5)
-                                    .help(inDiff ? "Show this comment in the diff" : "This file isn't part of the current diff")
+                                let resolved = model.isResolved(annotation)
+                                HStack(alignment: .top, spacing: 6) {
+                                    Button { onJump(annotation) } label: { commentRow(annotation, resolved: resolved) }
+                                        .buttonStyle(.plain)
+                                        .disabled(!inDiff)
+                                        .opacity(inDiff ? (resolved ? 0.55 : 1) : 0.5)
+                                        .help(inDiff ? "Show this comment in the diff" : "This file isn't part of the current diff")
+                                    Button { model.toggleResolved(annotation) } label: {
+                                        Image(systemName: resolved ? "checkmark.circle.fill" : "checkmark.circle")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(resolved ? Color.green : Color.secondary)
+                                    .help(resolved ? "Reopen this comment" : "Mark this comment as resolved")
+                                    .padding(.top, 8)
+                                }
                             }
                         }
                     }
@@ -462,11 +539,11 @@ struct ReviewInspector: View {
             .help("Remove this review and its comments from the diff")
     }
 
-    private func commentRow(_ annotation: Annotation) -> some View {
+    private func commentRow(_ annotation: Annotation, resolved: Bool) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: annotation.kind.icon).foregroundStyle(annotation.kind.color)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(annotation.kind.label) · \(annotation.side == .old ? "old " : "")\(annotation.lineLabel)")
+                Text("\(resolved ? "Resolved · " : "")\(annotation.kind.label) · \(annotation.side == .old ? "old " : "")\(annotation.lineLabel)")
                     .font(.caption.weight(.semibold)).foregroundStyle(annotation.kind.color)
                 Text(annotation.comment)
                     .font(.callout)
@@ -483,10 +560,11 @@ struct ReviewInspector: View {
 
 private struct KindCounts: View {
     let annotations: [Annotation]
+    var resolved = 0
 
     var body: some View {
         HStack(spacing: 10) {
-            ForEach(AnnotationKind.allCases, id: \.self) { kind in
+            ForEach(AnnotationKind.allCases.filter { $0 != .question }, id: \.self) { kind in
                 let count = annotations.filter { $0.kind == kind }.count
                 if count > 0 {
                     Label("\(count) \(kind.label.lowercased())", systemImage: kind.icon)
@@ -495,7 +573,11 @@ private struct KindCounts: View {
                 }
             }
             if annotations.isEmpty {
-                Text("No comments").font(.caption).foregroundStyle(.secondary)
+                Text(resolved > 0 ? "All comments resolved" : "No comments").font(.caption).foregroundStyle(.secondary)
+            }
+            if resolved > 0, !annotations.isEmpty {
+                Label("\(resolved) resolved", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -516,35 +598,38 @@ private struct ReviewBox<Content: View>: View {
 
 // MARK: - Inline comments
 
-/// A request from the review panel to scroll to a comment. The token makes repeated
-/// clicks on the same comment count as new requests.
-struct JumpRequest: Equatable {
-    let annotation: Annotation
-    let token = UUID()
+/// What the buttons on a comment card do.
+struct CardActions {
+    let toggleResolved: (Annotation) -> Void
+    let remove: (Annotation) -> Void
+    let cancel: (Annotation) -> Void
 }
 
 struct AnnotationCard: View {
     let annotation: Annotation
     var note: String?
     var isFlashing = false
+    var isResolved = false
+    var isPending = false
+    var actions: CardActions?
 
     var body: some View {
         let kind = annotation.kind
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: kind.icon).foregroundStyle(kind.color)
+            Image(systemName: isResolved ? "checkmark.circle.fill" : kind.icon).foregroundStyle(kind.color)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(kind.label).font(.caption.weight(.bold)).foregroundStyle(kind.color)
-                    Text("Claude · \(annotation.side == .old ? "old " : "")\(annotation.lineLabel)"
+                    Text(isResolved ? "Resolved" : kind.label).font(.caption.weight(.bold)).foregroundStyle(kind.color)
+                    Text("\(kind == .question ? "You" : "Claude") · \(annotation.side == .old ? "old " : "")\(annotation.lineLabel)"
                          + (note.map { " · \($0)" } ?? ""))
                         .font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    buttons
                 }
-                Text(annotation.comment)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
+                content
             }
-            Spacer(minLength: 0)
         }
+        .opacity(isResolved ? 0.6 : 1)
         .padding(.vertical, 8).padding(.horizontal, 10)
         .background(kind.color.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         .overlay(alignment: .leading) {
@@ -560,6 +645,57 @@ struct AnnotationCard: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if annotation.kind == .question {
+            Text(annotation.question ?? "")
+                .font(.callout.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            if isPending {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Claude is thinking…").font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
+            } else if annotation.comment.isEmpty {
+                Text("No answer — the request was interrupted.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text(Self.markdown(annotation.comment))
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
+        } else {
+            Text(annotation.comment)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
+        if let actions {
+            HStack(spacing: 10) {
+                if annotation.kind == .question {
+                    if isPending { Button("Stop") { actions.cancel(annotation) } }
+                    Button { actions.remove(annotation) } label: { Image(systemName: "xmark") }
+                        .help("Remove this question")
+                } else {
+                    Button(isResolved ? "Reopen" : "Resolve") { actions.toggleResolved(annotation) }
+                        .help(isResolved ? "Mark this comment as not resolved" : "Mark this comment as resolved")
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+    }
+
+    /// Claude's answers use inline Markdown (code, bold, links); line breaks are kept.
+    static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
     }
 }
 

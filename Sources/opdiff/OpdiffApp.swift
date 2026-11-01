@@ -19,6 +19,18 @@ struct OpdiffApp: App {
                 Button("Open Repository…") { model.chooseRepository() }
                     .keyboardShortcut("o")
             }
+            CommandGroup(after: .textEditing) {
+                Divider()
+                Button("Find in Diff…") { model.showFind() }
+                    .keyboardShortcut("f")
+                    .disabled(model.files.isEmpty)
+                Button("Find Next") { model.findNext(forward: true) }
+                    .keyboardShortcut("g")
+                    .disabled(model.searchMatches.isEmpty)
+                Button("Find Previous") { model.findNext(forward: false) }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .disabled(model.searchMatches.isEmpty)
+            }
             CommandGroup(after: .pasteboard) {
                 Divider()
                 Button("Copy Selected Lines") { model.copyLines(asDiff: false) }
@@ -31,6 +43,8 @@ struct OpdiffApp: App {
             CommandGroup(after: .toolbar) {
                 Toggle("Wrap Long Lines", isOn: $wrapLines)
                     .keyboardShortcut("w", modifiers: [.command, .option])
+                Toggle("Hide Whitespace Changes", isOn: $model.ignoreWhitespace)
+                Toggle("Refresh Automatically", isOn: $model.autoRefresh)
                 Button("Refresh") { model.refresh() }
                     .keyboardShortcut("r")
                 Button("Swap Base and Compare") { model.swap() }
@@ -39,6 +53,20 @@ struct OpdiffApp: App {
                 Button("Expand All Files") { model.expandAll() }
                 Button("Collapse All Files") { model.collapseAll() }
                 Divider()
+            }
+            // Single-letter shortcuts are handled by ContentView's key monitor (so they don't fire
+            // while typing); the menu lists them.
+            CommandMenu("Go") {
+                Button("Next Change  (J)") { model.goToChange(forward: true) }
+                Button("Previous Change  (K)") { model.goToChange(forward: false) }
+                Divider()
+                Button("Next Comment  (N)") { model.goToComment(forward: true) }
+                Button("Previous Comment  (P)") { model.goToComment(forward: false) }
+                Divider()
+                Button("Toggle Viewed, Go to Next File  (V)") { model.toggleViewedAndAdvance() }
+                Button("Open in Editor  (O)") { model.openCurrentInEditor() }
+                Button("Ask Claude About Selected Lines…  (A)") { model.beginQuestion() }
+                    .disabled(!model.hasLineSelection)
             }
         }
 
@@ -51,9 +79,29 @@ struct OpdiffApp: App {
 struct SettingsView: View {
     @Bindable var model: CompareModel
     @AppStorage("wrapLines") private var wrapLines = true
+    @AppStorage("editor") private var editor = EditorChoice.current.rawValue
+    @AppStorage("customEditorCommand") private var customCommand = EditorOpener.defaultCustomCommand
 
     var body: some View {
         Form {
+            Section {
+                Picker("Open files in", selection: $editor) {
+                    ForEach(EditorChoice.allCases) { choice in
+                        Text(choice.label + (choice.isInstalled ? "" : " (not installed)")).tag(choice.rawValue)
+                    }
+                }
+                if editor == EditorChoice.custom.rawValue {
+                    TextField("Command", text: $customCommand)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Run through your login shell. {file} is replaced with the file's path, {line} with the line number.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Section {
+                Toggle("Refresh automatically when files change", isOn: $model.autoRefresh)
+                Toggle("Hide whitespace changes", isOn: $model.ignoreWhitespace)
+            }
             Section {
                 Picker("Diff algorithm", selection: $model.diffAlgorithm) {
                     ForEach(DiffAlgorithm.allCases) { Text($0.label).tag($0) }

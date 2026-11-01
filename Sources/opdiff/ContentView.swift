@@ -7,9 +7,8 @@ struct ContentView: View {
     @State private var filter = ""
     @State private var showReview = false
     @AppStorage("reviewPaneWidth") private var reviewPaneWidth = 360.0
-    @State private var jumpRequest: JumpRequest?
-    @AppStorage("splitView") private var splitView = false
     @AppStorage("wrapLines") private var wrapLines = true
+    @State private var keyMonitor: Any?
 
     var body: some View {
         Group {
@@ -27,14 +26,19 @@ struct ContentView: View {
                     // hit-tested its buttons ~one toolbar height above where they were drawn,
                     // so clicks landed on the wrong comment (or on nothing).
                     HStack(spacing: 0) {
-                        DiffListView(model: model, selection: $selection, splitView: splitView, wrapLines: wrapLines,
-                                     jumpRequest: jumpRequest) {
-                            showReview = true
+                        VStack(spacing: 0) {
+                            if model.findVisible {
+                                FindBar(model: model)
+                                Divider()
+                            }
+                            DiffListView(model: model, selection: $selection, wrapLines: wrapLines) {
+                                showReview = true
+                            }
                         }
                         if showReview {
                             PaneDivider(width: $reviewPaneWidth)
                             ReviewInspector(model: model, onClose: { showReview = false }) { annotation in
-                                jumpRequest = JumpRequest(annotation: annotation)
+                                model.jump(to: annotation)
                             }
                                 .frame(width: reviewPaneWidth)
                                 .background(Color(nsColor: .windowBackgroundColor))
@@ -45,8 +49,11 @@ struct ContentView: View {
                 // Show the review panel when a review starts or a new one arrives.
                 .onChange(of: model.isReviewing) { _, running in if running { showReview = true } }
                 .onChange(of: model.storedReview?.createdAt) { _, date in if date != nil { showReview = true } }
+                .sheet(item: $model.questionDraft) { draft in QuestionSheet(model: model, draft: draft) }
             }
         }
+        .background(WindowReader { model.mainWindow = $0 })
+        .onAppear(perform: installKeyMonitor)
         .navigationTitle(model.repo?.lastPathComponent ?? "OptimusDiff")
         .navigationSubtitle(model.base.isEmpty || model.head.isEmpty ? "" : "\(model.displayName(model.base))...\(model.displayName(model.head))")
         .dropDestination(for: URL.self) { urls, _ in
@@ -97,7 +104,7 @@ struct ContentView: View {
                       ? "Include staged, unstaged and untracked changes in the working tree"
                       : "Only available when 'compare' is the checked-out branch (\(model.currentBranch ?? "none"))")
             AskClaudeButton(model: model)
-            Picker("Layout", selection: $splitView) {
+            Picker("Layout", selection: $model.splitView) {
                 Image(systemName: "rectangle").help("Unified").tag(false)
                 Image(systemName: "rectangle.split.2x1").help("Split").tag(true)
             }
@@ -109,6 +116,17 @@ struct ContentView: View {
                 Label("Claude Review", systemImage: "sidebar.right")
             }
             .help(showReview ? "Hide the Claude review panel" : "Show the Claude review panel")
+        }
+    }
+}
+
+extension ContentView {
+    /// Single-letter shortcuts (j/k, n/p, v, o, a); the model ignores them while typing.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        let model = model
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            MainActor.assumeIsolated { model.handleKey(event) } ? nil : event
         }
     }
 }

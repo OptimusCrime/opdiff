@@ -39,7 +39,8 @@ public enum Git {
     }()
 
     @discardableResult
-    public static func run(_ args: [String], in dir: URL, allowedExitCodes: Set<Int32> = [0]) throws -> Data {
+    public static func run(_ args: [String], in dir: URL, allowedExitCodes: Set<Int32> = [0],
+                           input: Data? = nil) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = ["-c", "core.quotePath=false", "-c", "color.ui=never",
@@ -54,9 +55,16 @@ public enum Git {
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
-        process.standardInput = FileHandle.nullDevice
+        let inPipe = input.map { _ in Pipe() }
+        process.standardInput = inPipe ?? FileHandle.nullDevice
         do { try process.run() } catch {
             throw GitError(message: "Could not run git: \(error.localizedDescription)")
+        }
+        if let input, let inPipe {
+            DispatchQueue.global().async {
+                try? inPipe.fileHandleForWriting.write(contentsOf: input)
+                try? inPipe.fileHandleForWriting.close()
+            }
         }
 
         // Drain stderr concurrently so a chatty git can't deadlock on a full pipe.
@@ -122,7 +130,8 @@ public enum Git {
     /// since it diverged from `base`. With `includeWorkingTree`, `head` must be the
     /// checked-out branch, and staged, unstaged and untracked changes are included.
     public static func compare(repo: URL, base: String, head: String, includeWorkingTree: Bool,
-                               algorithm: DiffAlgorithm = .gitConfig) throws -> Comparison {
+                               algorithm: DiffAlgorithm = .gitConfig,
+                               ignoreWhitespace: Bool = false) throws -> Comparison {
         for ref in [base, head] {
             guard (try? run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], in: repo)) != nil else {
                 throw GitError(message: "Unknown branch or revision: \(ref)")
@@ -130,11 +139,16 @@ public enum Git {
         }
 
         let mergeBase = (try? string(["merge-base", base, head], in: repo)).flatMap { $0.isEmpty ? nil : $0 }
-        var diffArgs = ["diff"] + diffFlags + algorithm.arguments + ["--find-renames", mergeBase ?? base]
+        var diffArgs = ["diff"] + diffFlags + algorithm.arguments + (ignoreWhitespace ? ["-w"] : [])
+            + ["--find-renames", mergeBase ?? base]
         if !includeWorkingTree { diffArgs.append(head) }
         diffArgs.append("--")
 
         var files = DiffParser.parse(try run(diffArgs, in: repo))
+        if ignoreWhitespace {
+            // -w leaves a header without hunks for files whose only changes were whitespace.
+            files.removeAll { $0.status == .modified && $0.hunks.isEmpty && !$0.isBinary }
+        }
         if includeWorkingTree {
             files += try untrackedFiles(in: repo)
             files.sort { $0.path < $1.path }
@@ -142,6 +156,28 @@ public enum Git {
 
         let commits = try log(["\(base)..\(head)"], in: repo)
         return Comparison(files: files, commits: commits, mergeBase: mergeBase)
+    }
+
+    /// One file's diff with `context` lines around each change (git's -U), for "show more context".
+    /// `to` nil compares with the working tree.
+    public static func fileDiff(repo: URL, from: String, to: String?, path: String, oldPath: String?,
+                                context: Int, algorithm: DiffAlgorithm = .gitConfig,
+                                ignoreWhitespace: Bool = false) throws -> FileDiff? {
+        var args = ["diff"] + diffFlags + algorithm.arguments + (ignoreWhitespace ? ["-w"] : [])
+            + ["-U\(context)", "--find-renames", from]
+        if let to { args.append(to) }
+        args += ["--", path]
+        if let oldPath, oldPath != path { args.append(oldPath) }
+        return DiffParser.parse(try run(args, in: repo)).first { $0.path == path }
+    }
+
+    /// The paths (relative to the repo) that .gitignore excludes.
+    public static func ignoredPaths(_ paths: [String], in repo: URL) -> Set<String> {
+        guard !paths.isEmpty else { return [] }
+        let input = Data(paths.joined(separator: "\0").utf8 + [0])
+        guard let out = try? run(["check-ignore", "--stdin", "-z"], in: repo,
+                                 allowedExitCodes: [0, 1], input: input) else { return [] }
+        return Set(out.split(separator: 0).map { String(decoding: $0, as: UTF8.self) })
     }
 
     /// The most recent commits reachable from `ref`, newest first.

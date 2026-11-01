@@ -33,17 +33,22 @@ private enum Palette {
     static let header = Color(nsColor: .windowBackgroundColor)
     static let code = Color(nsColor: .textBackgroundColor)
     static let selected = Color.accentColor.opacity(0.22)
+    /// Word-level changes inside a changed line.
+    static let addWord = Color.green.opacity(0.38)
+    static let delWord = Color.red.opacity(0.38)
+    static let match = Color.yellow.opacity(0.45)
+    static let currentMatch = Color.orange.opacity(0.9)
 }
 
 /// All files in one long scroll, like GitHub's "Files changed" tab.
 struct DiffListView: View {
     let model: CompareModel
     @Binding var selection: String?
-    let splitView: Bool
     let wrapLines: Bool
-    let jumpRequest: JumpRequest?
     let onOpenReview: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+
+    private var splitView: Bool { model.splitView }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -70,47 +75,59 @@ struct DiffListView: View {
             .background(Color(nsColor: .textBackgroundColor))
             .task(id: colorScheme) { await SyntaxHighlighter.shared.warmUp(dark: colorScheme == .dark) }
             .onChange(of: selection) { _, id in
-                if let id { proxy.scrollTo(id, anchor: .top) }
+                if let id {
+                    model.noteFileShown(id)
+                    proxy.scrollTo(id, anchor: .top)
+                }
             }
-            .onChange(of: jumpRequest) { _, request in
-                if let request { jump(to: request.annotation, proxy: proxy) }
+            .onChange(of: model.jumpRequest) { _, request in
+                if let request { scroll(to: request, proxy: proxy) }
             }
-            .onChange(of: splitView) { model.clearLineSelection() }
         }
     }
 
-    /// Scroll to the row that holds an annotation's card.
+    /// Scroll to a file, or to a row in it.
     ///
     /// The diff is a LazyVStack, so rows far away haven't been laid out and their heights
-    /// are estimates: a single scrollTo can land off target. Scroll to the file first, then
-    /// to the row, and once more after layout has settled.
-    private func jump(to annotation: Annotation, proxy: ScrollViewProxy) {
-        guard let fileID = model.fileID(for: annotation),
-              let file = model.files.first(where: { $0.id == fileID }) else { return }
-        model.revealForJump(fileID)
-        let rows = splitView ? file.splitRows : file.unifiedRows
-        let rowID = model.annotationLayout(for: file)?.rowIndex(of: annotation, in: rows).map { RowKey(fileID: fileID, index: $0) }
+    /// are estimates: a single scrollTo can land off target. Scroll again once layout has
+    /// settled (and after a collapsed file has been expanded).
+    private func scroll(to request: JumpRequest, proxy: ScrollViewProxy) {
+        guard let row = request.row else {
+            proxy.scrollTo(request.fileID, anchor: .top)
+            return
+        }
+        let rowID = RowKey(fileID: request.fileID, index: row)
         // Below the sticky file header rather than underneath it.
         let anchor = UnitPoint(x: 0, y: 0.25)
-        proxy.scrollTo(fileID, anchor: .top)
-        model.flash(annotation)
-        guard let rowID else { return }  // comment not on a changed line: the file header is the target
+        proxy.scrollTo(rowID, anchor: anchor)
         Task { @MainActor in
-            for delay in [80, 220, 400] {
+            for delay in [60, 180, 350] {
                 try? await Task.sleep(for: .milliseconds(delay))
+                guard model.jumpRequest == request else { return }  // a newer jump took over
                 proxy.scrollTo(rowID, anchor: anchor)
             }
         }
     }
 
-    private func rowActions(fileID: String, index: Int) -> RowActions {
-        let split = splitView
+    private func rowActions(file: FileDiff, index: Int) -> RowActions {
+        let fileID = file.id, split = splitView
         let target = (fileID: fileID, index: index, split: split)
         return RowActions(
             select: { extend in model.selectRow(fileID: fileID, index: index, split: split, extend: extend) },
             copy: { asDiff in model.copyLines(asDiff: asDiff, fallback: target) },
             copyReference: { model.copyReference(fallback: target) },
-            hasSelection: { model.hasLineSelection })
+            hasSelection: { model.hasLineSelection },
+            ask: { model.beginQuestion(fallback: target) },
+            openInEditor: { model.openInEditor(fileID: fileID, index: index) },
+            canOpenInEditor: file.status != .deleted,
+            expand: { full in model.expandContext(file, full: full) },
+            card: cardActions)
+    }
+
+    private var cardActions: CardActions {
+        CardActions(toggleResolved: { model.toggleResolved($0) },
+                    remove: { model.removeQuestion($0) },
+                    cancel: { model.cancelQuestion($0) })
     }
 
     private func highlightTaskID(_ file: FileDiff) -> String {
@@ -132,17 +149,25 @@ struct DiffListView: View {
                 let highlight = model.highlighted(file, dark: colorScheme == .dark)
                 let layout = model.annotationLayout(for: file)
                 let flashed = model.flashedAnnotationID
+                let marks = RowContent.Marks(
+                    file: file, hits: model.searchHits[file.id],
+                    currentMatch: model.currentMatch.flatMap { $0.fileID == file.id ? $0 : nil },
+                    canExpand: model.canExpandContext(file),
+                    resolved: model.storedReview?.resolved ?? [], pending: model.pendingQuestionIDs)
                 ForEach(layout?.unplaced ?? []) { annotation in
                     AnnotationCard(annotation: annotation, note: "not on a changed line",
-                                   isFlashing: annotation.id == flashed)
+                                   isFlashing: annotation.id == flashed,
+                                   isResolved: model.isResolved(annotation), isPending: model.isPending(annotation),
+                                   actions: cardActions)
                         .cardSides()
                 }
                 ForEach(RowKeys(fileID: file.id, count: rows.count), id: \.self) { key in
                     let i = key.index
-                    let content = RowContent.make(rows[i], highlight: highlight, layout: layout, flashedID: flashed,
+                    let content = RowContent.make(rows[i], highlight: highlight, layout: layout, marks: marks,
+                                                  flashedID: flashed,
                                                   isSelected: model.isRowSelected(fileID: file.id, index: i, split: splitView))
                     DiffRowView(content: content, digits: digits, wrap: wrapLines,
-                                actions: rowActions(fileID: file.id, index: i))
+                                actions: rowActions(file: file, index: i))
                         .equatable()
                 }
             }
@@ -188,6 +213,11 @@ private struct SummaryHeader: View {
                 if let mb = model.mergeBase {
                     Text("merge base \(String(mb.prefix(8)))").font(.callout.monospaced()).foregroundStyle(.tertiary)
                 }
+                Spacer()
+                Toggle("Hide whitespace changes", isOn: Binding(get: { model.ignoreWhitespace },
+                                                                set: { model.ignoreWhitespace = $0 }))
+                    .toggleStyle(.checkbox)
+                    .help("Ignore changes in whitespace (git diff -w)")
             }
             if let error = model.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
@@ -261,8 +291,16 @@ private struct FileHeader: View {
             Toggle("Viewed", isOn: Binding(get: { model.isViewed(file) }, set: { model.setViewed(file, $0) }))
                 .toggleStyle(.checkbox)
             Menu {
-                Button("Open File") { if let url = model.fileURL(file) { NSWorkspace.shared.open(url) } }
+                Button("Open in Editor") { model.openInEditor(fileID: file.id, index: nil) }
                     .disabled(file.status == .deleted)
+                Button("Open with Default App") { if let url = model.fileURL(file) { NSWorkspace.shared.open(url) } }
+                    .disabled(file.status == .deleted)
+                if model.canExpandContext(file) {
+                    Divider()
+                    Button("Show More Context") { model.expandContext(file, full: false) }
+                    Button("Show Full File") { model.expandContext(file, full: true) }
+                }
+                Divider()
                 Button("Reveal in Finder") {
                     if let url = model.fileURL(file) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 }
@@ -321,10 +359,20 @@ struct RowContent: Equatable {
     }
 
     enum Body: Equatable {
-        case hunk(String)
+        case hunk(String, canExpand: Bool)
         case note(String)
         case unified(DiffLine, AttributedString?, AnnotationKind?)
         case split(Cell?, Cell?)
+    }
+
+    /// Per-file inputs for word emphasis, search highlights, context buttons and card state.
+    struct Marks {
+        let file: FileDiff
+        let hits: [LineID: [Range<Int>]]?
+        let currentMatch: SearchMatch?
+        let canExpand: Bool
+        let resolved: Set<String>
+        let pending: Set<String>
     }
 
     let body: Body
@@ -332,19 +380,22 @@ struct RowContent: Equatable {
     /// Only set when one of this row's cards is flashing, so other rows stay equal.
     let flashedID: String?
     let isSelected: Bool
+    /// Of this row's cards: which are resolved / waiting for Claude.
+    let resolvedIDs: Set<String>
+    let pendingIDs: Set<String>
 
-    static func make(_ row: DiffRow, highlight: HighlightedFile?, layout: AnnotationLayout?,
+    static func make(_ row: DiffRow, highlight: HighlightedFile?, layout: AnnotationLayout?, marks: Marks,
                      flashedID: String?, isSelected: Bool) -> RowContent {
         var cards: [Annotation] = []
         let body: Body
         switch row {
         case .hunk(let header):
-            body = .hunk(header)
+            body = .hunk(header, canExpand: marks.canExpand)
         case .line(let line):
             if line.kind == .noNewline {
                 body = .note(line.text)
             } else {
-                body = .unified(line, highlight?.text(for: line), layout?.marker(for: line))
+                body = .unified(line, styled(line, highlight?.text(for: line), marks), layout?.marker(for: line))
                 cards = layout?.cards(after: line) ?? []
             }
         case .pair(let old, let new):
@@ -352,10 +403,10 @@ struct RowContent: Equatable {
                 body = .note(line.text)
             } else {
                 let left = old.map { Cell(line: $0, number: $0.oldNumber,
-                                          highlighted: highlight?.old[$0.oldNumber ?? -1],
+                                          highlighted: styled($0, highlight?.old[$0.oldNumber ?? -1], marks),
                                           marker: layout?.markers[.old]?[$0.oldNumber ?? -1]) }
                 let right = new.map { Cell(line: $0, number: $0.newNumber,
-                                           highlighted: highlight?.new[$0.newNumber ?? -1],
+                                           highlighted: styled($0, highlight?.new[$0.newNumber ?? -1], marks),
                                            marker: layout?.markers[.new]?[$0.newNumber ?? -1]) }
                 body = .split(left, right)
                 var seen = Set<String>()
@@ -364,7 +415,36 @@ struct RowContent: Equatable {
             }
         }
         let flash = flashedID.flatMap { id in cards.contains { $0.id == id } ? id : nil }
-        return RowContent(body: body, cards: cards, flashedID: flash, isSelected: isSelected)
+        let ids = Set(cards.map(\.id))
+        return RowContent(body: body, cards: cards, flashedID: flash, isSelected: isSelected,
+                          resolvedIDs: cards.isEmpty ? [] : ids.intersection(marks.resolved),
+                          pendingIDs: cards.isEmpty ? [] : ids.intersection(marks.pending))
+    }
+
+    /// The line's text with word-level changes and search matches painted as backgrounds.
+    /// Returns the plain highlight when there's nothing to paint (the common case).
+    static func styled(_ line: DiffLine, _ base: AttributedString?, _ marks: Marks) -> AttributedString? {
+        let word: [Range<Int>]? = switch line.kind {
+        case .deletion: line.oldNumber.flatMap { marks.file.oldEmphasis[$0] }
+        case .addition: line.newNumber.flatMap { marks.file.newEmphasis[$0] }
+        default: nil
+        }
+        let hits = marks.hits?[line.id]
+        guard word != nil || hits != nil else { return base }
+
+        var text = base ?? AttributedString(line.displayText)
+        let count = text.characters.count
+        func paint(_ ranges: [Range<Int>], _ color: Color) {
+            for r in ranges where !r.isEmpty && r.upperBound <= count {
+                let lower = text.characters.index(text.startIndex, offsetBy: r.lowerBound)
+                let upper = text.characters.index(lower, offsetBy: r.count)
+                text[lower..<upper].backgroundColor = color
+            }
+        }
+        if let word { paint(word, line.kind == .addition ? Palette.addWord : Palette.delWord) }
+        if let hits { paint(hits, Palette.match) }
+        if let current = marks.currentMatch, current.line == line.id { paint([current.range], Palette.currentMatch) }
+        return text
     }
 }
 
@@ -373,6 +453,11 @@ struct RowActions {
     let copy: (_ asDiff: Bool) -> Void
     let copyReference: () -> Void
     let hasSelection: () -> Bool
+    let ask: () -> Void
+    let openInEditor: () -> Void
+    let canOpenInEditor: Bool
+    let expand: (_ full: Bool) -> Void
+    let card: CardActions
 }
 
 private struct DiffRowView: View, Equatable {
@@ -395,7 +480,9 @@ private struct DiffRowView: View, Equatable {
                            alignment: .topLeading)
             }
             ForEach(content.cards) { card in
-                AnnotationCard(annotation: card, isFlashing: card.id == content.flashedID)
+                AnnotationCard(annotation: card, isFlashing: card.id == content.flashedID,
+                               isResolved: content.resolvedIDs.contains(card.id),
+                               isPending: content.pendingIDs.contains(card.id), actions: actions.card)
                     .textSelection(.enabled)
             }
         }
@@ -405,14 +492,27 @@ private struct DiffRowView: View, Equatable {
     @ViewBuilder
     private var line: some View {
         switch content.body {
-        case .hunk(let header):
-            Text(header)
-                .font(mono)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.vertical, 4).padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.hunk)
+        case .hunk(let header, let canExpand):
+            HStack(spacing: 12) {
+                Text(header)
+                    .font(mono)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if canExpand {
+                    Button { actions.expand(false) } label: {
+                        Label("More context", systemImage: "arrow.up.and.down.text.horizontal")
+                    }
+                    .help("Show 20 more unchanged lines around each change in this file")
+                    Button("Full file") { actions.expand(true) }
+                        .help("Show the whole file around the changes")
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+            .padding(.vertical, 4).padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.hunk)
         case .note(let text):
             Text(text)
                 .font(mono.italic())
@@ -500,6 +600,12 @@ private extension View {
                 Button(actions.hasSelection() ? "Copy Selected Lines" : "Copy Line") { actions.copy(false) }
                 Button("Copy as Diff") { actions.copy(true) }
                 Button("Copy Reference (path:line)") { actions.copyReference() }
+                Divider()
+                Button(actions.hasSelection() ? "Ask Claude About Selected Lines…" : "Ask Claude About This Line…") {
+                    actions.ask()
+                }
+                Button("Open in Editor") { actions.openInEditor() }
+                    .disabled(!actions.canOpenInEditor)
             }
     }
 }

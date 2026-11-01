@@ -46,15 +46,16 @@ final class CompareModel {
     private(set) var mode: CompareMode = .branches
     var includeUncommitted = true
 
-    private(set) var files: [FileDiff] = []
+    /// Set only here and in CompareModel+Features (context reloads).
+    var files: [FileDiff] = []
     private(set) var commits: [Commit] = []
     private(set) var mergeBase: String?
     private(set) var isLoading = false
     var errorMessage: String?
 
-    private(set) var collapsed: Set<String> = []
+    var collapsed: Set<String> = []
     private(set) var viewed: Set<String> = []
-    private(set) var expandedLarge: Set<String> = []
+    var expandedLarge: Set<String> = []
     private(set) var recentRepos: [String] = UserDefaults.standard.stringArray(forKey: "recentRepos") ?? []
 
     /// Syntax highlighting results, filled lazily as files scroll into view.
@@ -97,7 +98,57 @@ final class CompareModel {
     }
 
     /// Lines selected by clicking (shift-click extends), for copying.
-    private(set) var lineSelection: LineSelection?
+    var lineSelection: LineSelection?
+
+    // MARK: View options (persisted)
+
+    var splitView = UserDefaults.standard.bool(forKey: "splitView") {
+        didSet { UserDefaults.standard.set(splitView, forKey: "splitView"); lineSelection = nil }
+    }
+    /// git diff -w.
+    var ignoreWhitespace = UserDefaults.standard.bool(forKey: "ignoreWhitespace") {
+        didSet { UserDefaults.standard.set(ignoreWhitespace, forKey: "ignoreWhitespace") }
+    }
+    /// Reload when files in the repository change.
+    var autoRefresh = UserDefaults.standard.object(forKey: "autoRefresh") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoRefresh, forKey: "autoRefresh"); updateWatcher() }
+    }
+    /// Leave resolved review comments out of the diff and the comment list.
+    var hideResolved = UserDefaults.standard.bool(forKey: "hideResolved") {
+        didSet { UserDefaults.standard.set(hideResolved, forKey: "hideResolved"); rebuildAnnotationLayouts() }
+    }
+
+    // MARK: Feature state (see CompareModel+Features.swift)
+
+    /// Lines of context per file after "More context" / "Full file" (git's default is 3).
+    var contextLines: [String: Int] = [:]
+    @ObservationIgnored var contextScope = ""
+    /// Scroll request for the diff view.
+    var jumpRequest: JumpRequest?
+    /// Where keyboard navigation continues from when no lines are selected.
+    @ObservationIgnored var navPosition: NavPosition?
+    @ObservationIgnored var lastCommentID: String?
+
+    var findVisible = false
+    var findFocusToken = 0
+    var searchQuery = "" { didSet { if searchQuery != oldValue { scheduleSearch(jump: true) } } }
+    var searchMatches: [SearchMatch] = []
+    var searchHits: [String: [LineID: [Range<Int>]]] = [:]
+    var currentMatchIndex: Int?
+    @ObservationIgnored var searchTask: Task<Void, Never>?
+
+    /// Questions asked about selected lines, with Claude's answers (saved per comparison).
+    var questions: [Annotation] = []
+    var pendingQuestionIDs: Set<String> = []
+    @ObservationIgnored var questionRuns: [String: ClaudeReviewRun] = [:]
+    var questionDraft: QuestionDraft?
+    @ObservationIgnored var questionsLoadedKey: String?
+
+    @ObservationIgnored var watcher: RepoWatcher?
+    @ObservationIgnored var changedPaths: Set<String> = []
+    @ObservationIgnored var watchDebounce: Task<Void, Never>?
+    /// The diff window, so keyboard shortcuts only act there.
+    @ObservationIgnored weak var mainWindow: NSWindow?
 
     private var reloadToken = 0
     private var launch: LaunchOptions?
@@ -111,7 +162,7 @@ final class CompareModel {
 
     /// The view re-runs `loadDiff()` whenever this changes.
     var compareKey: String {
-        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)|\(diffAlgorithm.rawValue)|\(reloadToken)"
+        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)|\(diffAlgorithm.rawValue)|\(ignoreWhitespace)|\(reloadToken)"
     }
 
     // MARK: Loading
@@ -136,6 +187,7 @@ final class CompareModel {
             history = []; commitsAfterBase = []; savedBranchSelection = nil
             errorMessage = nil
             addRecent(info.root.path)
+            updateWatcher()
 
             // Two refs that aren't branches (e.g. `opdiff <sha1> <sha2>`): open in commits mode.
             if let base, let head, !isBranch(base), !isBranch(head) {
@@ -160,24 +212,31 @@ final class CompareModel {
             refreshReviewForCurrentDiff()
             return
         }
-        let (base, head, uncommitted, algorithm) = (base, head, effectiveUncommitted, diffAlgorithm)
+        let (base, head, uncommitted, algorithm, ws) = (base, head, effectiveUncommitted, diffAlgorithm, ignoreWhitespace)
         isLoading = true
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                try Git.compare(repo: repo, base: base, head: head, includeWorkingTree: uncommitted, algorithm: algorithm)
+                try Git.compare(repo: repo, base: base, head: head, includeWorkingTree: uncommitted,
+                                algorithm: algorithm, ignoreWhitespace: ws)
             }.value
             guard !Task.isCancelled else { return }
             files = result.files.sorted(by: Self.treeOrder)
-            lineSelection = nil
             commits = result.commits
             mergeBase = result.mergeBase
             errorMessage = nil
+            // Keep the selection across refreshes while it still points at existing rows.
+            if let s = lineSelection,
+               !(files.first { $0.id == s.fileID }.map { s.range.upperBound < rows(of: $0, split: s.split).count } ?? false) {
+                lineSelection = nil
+            }
+            await reapplyContext()
         } catch {
             guard !Task.isCancelled else { return }
             files = []; commits = []; mergeBase = nil
             errorMessage = error.localizedDescription
         }
         refreshReviewForCurrentDiff()
+        scheduleSearch(jump: false)
         isLoading = false
     }
 
@@ -297,7 +356,8 @@ final class CompareModel {
 
     // MARK: Per-file UI state
 
-    private func viewedKey(_ f: FileDiff) -> String { "\(f.path)#\(f.contentHash)" }
+    /// Only the changed lines count: showing more context keeps a file viewed.
+    private func viewedKey(_ f: FileDiff) -> String { "\(f.path)#\(f.changeHash)" }
 
     func isViewed(_ f: FileDiff) -> Bool { viewed.contains(viewedKey(f)) }
     func isCollapsed(_ f: FileDiff) -> Bool { collapsed.contains(f.id) }
@@ -348,13 +408,15 @@ final class CompareModel {
         var command: String
         var focus: String
         var costUSD: Double?
+        /// Ids of comments the user marked as resolved.
+        var resolved: Set<String>? = nil
     }
 
     var isReviewing: Bool { if case .running = reviewStatus { true } else { false } }
     var reviewIsOutdated: Bool { storedReview.map { $0.fingerprint != diffFingerprint } ?? false }
 
     /// Identifies what was compared, so a review is saved and restored per comparison.
-    private var reviewKey: String { "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)" }
+    var reviewKey: String { "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)" }
 
     func annotations(for file: FileDiff) -> [Annotation] { annotationsByFile[file.id] ?? [] }
 
@@ -436,7 +498,7 @@ final class CompareModel {
         rebuildAnnotationLayouts()
     }
 
-    private func rememberClaudeCommand(_ command: String) {
+    func rememberClaudeCommand(_ command: String) {
         recentClaudeCommands.removeAll { $0 == command }
         recentClaudeCommands.insert(command, at: 0)
         recentClaudeCommands = Array(recentClaudeCommands.prefix(6))
@@ -447,17 +509,47 @@ final class CompareModel {
     private func refreshReviewForCurrentDiff() {
         diffFingerprint = Self.fingerprint(files)
         let key = reviewKey
+        let hasComparison = repo != nil && !base.isEmpty && !head.isEmpty
         if reviewLoadedKey != key {
             reviewLoadedKey = key
-            storedReview = (repo == nil || base.isEmpty || head.isEmpty) ? nil : Self.loadReview(key: key)
+            storedReview = hasComparison ? Self.loadReview(key: key) : nil
+        }
+        if questionsLoadedKey != key {
+            questionsLoadedKey = key
+            questions = hasComparison ? Self.loadQuestions(key: key) : []
         }
         rebuildAnnotationLayouts()
     }
 
-    private func rebuildAnnotationLayouts() {
+    func isResolved(_ annotation: Annotation) -> Bool {
+        storedReview?.resolved?.contains(annotation.id) ?? false
+    }
+
+    var resolvedCount: Int {
+        guard let review = storedReview else { return 0 }
+        return review.review.annotations.filter(isResolved).count
+    }
+
+    func toggleResolved(_ annotation: Annotation) {
+        guard var review = storedReview, annotation.kind != .question else { return }
+        var resolved = review.resolved ?? []
+        if resolved.remove(annotation.id) == nil { resolved.insert(annotation.id) }
+        review.resolved = resolved
+        storedReview = review
+        Self.saveReview(review, key: reviewKey)
+        rebuildAnnotationLayouts()
+    }
+
+    /// Review comments (minus hidden resolved ones) plus the user's questions.
+    var visibleAnnotations: [Annotation] {
+        let review = (storedReview?.review.annotations ?? []).filter { !(hideResolved && isResolved($0)) }
+        return review + questions
+    }
+
+    func rebuildAnnotationLayouts() {
         var byFile: [String: [Annotation]] = [:]
         var fileIDs: [String: String] = [:]
-        for annotation in storedReview?.review.annotations ?? [] {
+        for annotation in visibleAnnotations {
             guard let file = AnnotationFileResolver.resolve(annotation.file, in: files) else { continue }
             byFile[file.id, default: []].append(annotation)
             fileIDs[annotation.id] = file.id
@@ -477,18 +569,34 @@ final class CompareModel {
         var hasher = SHA256()
         for file in files {
             hasher.update(data: Data("\u{1}\(file.path)\n".utf8))
-            for line in file.hunks.flatMap(\.lines) {
-                hasher.update(data: Data("\(line.kind)\(line.text)\n".utf8))
+            // Changed lines only, so showing more context doesn't make a review look outdated.
+            for line in file.hunks.flatMap(\.lines) where line.kind == .addition || line.kind == .deletion {
+                hasher.update(data: Data("\(line.kind)\(line.oldNumber ?? 0):\(line.newNumber ?? 0)\(line.text)\n".utf8))
             }
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func reviewURL(key: String) -> URL {
+    private static func reviewURL(key: String, folder: String = "reviews") -> URL {
         let name = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
         return URL.applicationSupportDirectory
-            .appendingPathComponent("OptimusDiff/reviews", isDirectory: true)
+            .appendingPathComponent("OptimusDiff/\(folder)", isDirectory: true)
             .appendingPathComponent(name + ".json")
+    }
+
+    static func loadQuestions(key: String) -> [Annotation] {
+        guard let data = try? Data(contentsOf: reviewURL(key: key, folder: "questions")) else { return [] }
+        return (try? JSONDecoder().decode([Annotation].self, from: data)) ?? []
+    }
+
+    static func saveQuestions(_ questions: [Annotation], key: String) {
+        let url = reviewURL(key: key, folder: "questions")
+        if questions.isEmpty { try? FileManager.default.removeItem(at: url); return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(questions) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 
     private static func loadReview(key: String) -> StoredReview? {
@@ -498,7 +606,7 @@ final class CompareModel {
         return try? decoder.decode(StoredReview.self, from: data)
     }
 
-    private static func saveReview(_ review: StoredReview, key: String) {
+    static func saveReview(_ review: StoredReview, key: String) {
         let url = reviewURL(key: key)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -528,6 +636,7 @@ final class CompareModel {
 
     /// Click selects one row; shift-click extends from the anchor (like GitHub/VS Code).
     func selectRow(fileID: String, index: Int, split: Bool, extend: Bool) {
+        navPosition = NavPosition(fileID: fileID, index: index)
         if extend, var s = lineSelection, s.fileID == fileID, s.split == split {
             s.range = min(s.anchor, index)...max(s.anchor, index)
             lineSelection = s
@@ -553,20 +662,20 @@ final class CompareModel {
         Self.copyToPasteboard(DiffCopy.reference(rows, in: file))
     }
 
-    private func rowsToCopy(fallback: (fileID: String, index: Int, split: Bool)?) -> (FileDiff, ArraySlice<DiffRow>)? {
+    func rowsToCopy(fallback: (fileID: String, index: Int, split: Bool)?) -> (FileDiff, ArraySlice<DiffRow>)? {
         var target = lineSelection
         if let fallback, !isRowSelected(fileID: fallback.fileID, index: fallback.index, split: fallback.split) {
             target = LineSelection(fileID: fallback.fileID, split: fallback.split, anchor: fallback.index,
                                    range: fallback.index...fallback.index)
         }
         guard let target, let file = files.first(where: { $0.id == target.fileID }) else { return nil }
-        let rows = target.split ? file.splitRows : file.unifiedRows
+        let rows = rows(of: file, split: target.split)
         let range = target.range.clamped(to: 0...(max(rows.count - 1, 0)))
         guard !rows.isEmpty else { return nil }
         return (file, rows[range])
     }
 
-    private static func copyToPasteboard(_ text: String) {
+    static func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }

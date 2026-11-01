@@ -167,18 +167,22 @@ final class FileBuilder {
         if status == .deleted { newPath = nil }
         if status == .modified, let o = oldPath, let n = newPath, o != n { status = .renamed }
 
-        var hasher = Hasher()
+        var hasher = Hasher(), changes = Hasher()
         var maxLine = 0
         for hunk in hunks {
             for line in hunk.lines {
                 hasher.combine(line)
+                if line.kind == .addition || line.kind == .deletion { changes.combine(line) }
                 maxLine = max(maxLine, line.oldNumber ?? 0, line.newNumber ?? 0)
             }
         }
         let unified = hunks.flatMap { [DiffRow.hunk($0.header)] + $0.lines.map(DiffRow.line) }
+        let (oldEmphasis, newEmphasis) = WordDiff.emphasis(for: hunks)
         return FileDiff(
             oldPath: oldPath, newPath: newPath, status: status, isBinary: isBinary, hunks: hunks,
             additions: additions, deletions: deletions, contentHash: hasher.finalize(),
-            maxLineNumber: maxLine, unifiedRows: unified, splitRows: DiffParser.splitRows(hunks))
+            changeHash: changes.finalize(),
+            maxLineNumber: maxLine, unifiedRows: unified, splitRows: DiffParser.splitRows(hunks),
+            oldEmphasis: oldEmphasis, newEmphasis: newEmphasis)
     }
 }

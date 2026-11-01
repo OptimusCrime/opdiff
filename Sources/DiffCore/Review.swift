@@ -4,6 +4,8 @@ import Foundation
 
 public enum AnnotationKind: String, Codable, Sendable, CaseIterable, Comparable {
     case important, attention, info
+    /// The user's own question about some lines, answered by Claude (not part of the review schema).
+    case question
 
     /// Higher wins when several annotations cover the same line.
     public var rank: Int {
@@ -11,6 +13,7 @@ public enum AnnotationKind: String, Codable, Sendable, CaseIterable, Comparable 
         case .important: 3
         case .attention: 2
         case .info: 1
+        case .question: 0
         }
     }
 
@@ -28,17 +31,25 @@ public struct Annotation: Codable, Sendable, Hashable, Identifiable {
     public var endLine: Int
     public var kind: AnnotationKind
     public var comment: String
+    /// For `.question`: what the user asked (`comment` holds Claude's answer).
+    public var question: String?
+    /// Stable id for user questions, whose answer (and so the content) changes.
+    public var uid: String?
 
-    public var id: String { "\(file):\(side.rawValue):\(startLine)-\(endLine):\(kind.rawValue):\(comment)" }
+    public var id: String {
+        uid ?? "\(file):\(side.rawValue):\(startLine)-\(endLine):\(kind.rawValue):\(comment)"
+    }
 
     public init(file: String, side: AnnotationSide, startLine: Int, endLine: Int,
-                kind: AnnotationKind, comment: String) {
+                kind: AnnotationKind, comment: String, question: String? = nil, uid: String? = nil) {
         self.file = file
         self.side = side
         self.startLine = min(startLine, endLine)
         self.endLine = max(startLine, endLine)
         self.kind = kind
         self.comment = comment
+        self.question = question
+        self.uid = uid
     }
 
     public var lineLabel: String {
@@ -77,10 +88,48 @@ public struct ClaudeResult: Sendable {
     public let costUSD: Double?
 }
 
+public struct ClaudeAnswer: Sendable {
+    public let answer: String
+    public let costUSD: Double?
+}
+
+/// Schema for answers to "Ask Claude about these lines".
+public enum AnswerSchema {
+    public static let json = #"{"type":"object","additionalProperties":false,"required":["answer"],"properties":{"answer":{"type":"string"}}}"#
+}
+
 public enum ClaudeOutput {
     /// Accepts either a single result object or an array of events (newer CLI versions),
     /// and tolerates shell start-up noise around the JSON.
     public static func parse(_ data: Data) throws -> ClaudeResult {
+        let (reviewData, cost) = try structuredOutput(data)
+        let decoded: Review
+        do { decoded = try JSONDecoder().decode(Review.self, from: reviewData) } catch {
+            throw GitError(message: "Claude's reply didn't match the review format: \(error.localizedDescription)")
+        }
+        // Re-create annotations so start/end are normalised.
+        var seen = Set<String>()
+        let annotations = decoded.annotations
+            .map { Annotation(file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
+                              kind: $0.kind, comment: $0.comment) }
+            .filter { seen.insert($0.id).inserted }  // identical duplicates would share an id
+        return ClaudeResult(review: Review(summary: decoded.summary, annotations: annotations), costUSD: cost)
+    }
+
+    /// The answer to a question; falls back to the plain text if Claude didn't use the schema.
+    public static func parseAnswer(_ data: Data) throws -> ClaudeAnswer {
+        let (answerData, cost) = try structuredOutput(data)
+        struct Answer: Decodable { let answer: String }
+        if let decoded = try? JSONDecoder().decode(Answer.self, from: answerData) {
+            return ClaudeAnswer(answer: decoded.answer, costUSD: cost)
+        }
+        let text = String(decoding: answerData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw GitError(message: "Claude returned an empty answer.") }
+        return ClaudeAnswer(answer: text, costUSD: cost)
+    }
+
+    /// The JSON Claude produced for the schema, and the run's cost.
+    static func structuredOutput(_ data: Data) throws -> (Data, Double?) {
         guard let result = findResultEvent(data) else {
             let text = String(decoding: data.prefix(600), as: UTF8.self)
             throw GitError(message: "Couldn't find Claude's result in its output.\n\(text)")
@@ -92,27 +141,13 @@ public enum ClaudeOutput {
             throw GitError(message: "Claude reported an error: \(message)")
         }
 
-        let reviewData: Data
+        let cost = result["total_cost_usd"] as? Double
         if let structured = result["structured_output"], JSONSerialization.isValidJSONObject(structured) {
-            reviewData = try JSONSerialization.data(withJSONObject: structured)
+            return (try JSONSerialization.data(withJSONObject: structured), cost)
         } else if let text = result["result"] as? String {
-            reviewData = Data(stripCodeFence(text).utf8)
-        } else {
-            throw GitError(message: "Claude's reply had no structured output.")
+            return (Data(stripCodeFence(text).utf8), cost)
         }
-
-        let decoded: Review
-        do { decoded = try JSONDecoder().decode(Review.self, from: reviewData) } catch {
-            throw GitError(message: "Claude's reply didn't match the review format: \(error.localizedDescription)")
-        }
-        // Re-create annotations so start/end are normalised.
-        var seen = Set<String>()
-        let annotations = decoded.annotations
-            .map { Annotation(file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
-                              kind: $0.kind, comment: $0.comment) }
-            .filter { seen.insert($0.id).inserted }  // identical duplicates would share an id
-        let review = Review(summary: decoded.summary, annotations: annotations)
-        return ClaudeResult(review: review, costUSD: result["total_cost_usd"] as? Double)
+        throw GitError(message: "Claude's reply had no structured output.")
     }
 
     private static func findResultEvent(_ data: Data) -> [String: Any]? {

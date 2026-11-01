@@ -86,7 +86,7 @@ public enum ReviewPrompt {
         return prompt
     }
 
-    static func render(_ file: FileDiff) -> String {
+    public static func render(_ file: FileDiff) -> String {
         var out = "\nFILE: \(file.path)"
         switch file.status {
         case .added: out += " (new file)"
@@ -104,18 +104,60 @@ public enum ReviewPrompt {
                 case .noNewline:
                     out += "            \(line.text)\n"
                 default:
-                    let old = line.oldNumber.map { String($0) } ?? ""
-                    let new = line.newNumber.map { String($0) } ?? ""
-                    let marker = line.kind == .addition ? "+" : line.kind == .deletion ? "-" : " "
-                    out += pad(old) + " " + pad(new) + " " + marker + " " + line.text + "\n"
+                    out += renderLine(line) + "\n"
                 }
             }
         }
         return out
     }
 
+    static func renderLine(_ line: DiffLine) -> String {
+        let old = line.oldNumber.map { String($0) } ?? ""
+        let new = line.newNumber.map { String($0) } ?? ""
+        let marker = line.kind == .addition ? "+" : line.kind == .deletion ? "-" : " "
+        return pad(old) + " " + pad(new) + " " + marker + " " + line.text
+    }
+
     private static func pad(_ s: String) -> String {
         String(repeating: " ", count: max(0, 5 - s.count)) + s
+    }
+}
+
+/// Prompt for "Ask Claude about these lines".
+public enum QuestionPrompt {
+    /// The file's diff is included for context up to this many characters.
+    static let maxFileDiffCharacters = 60_000
+
+    public static func build(file: FileDiff, selected: [DiffLine], question: String, context: ReviewContext) -> String {
+        var prompt = """
+        A developer is reviewing a code change and has a question about some lines in it. \
+        Answer the question directly and concisely (usually a few short paragraphs at most). \
+        Use Markdown for code and emphasis. You will not edit anything.
+
+        Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
+        \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
+        \(context.includesWorkingTree ? ", including uncommitted changes in the working tree" : "").
+
+        You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
+        history. Files on disk reflect the current working tree.
+
+        # The lines the question is about (\(file.path))
+
+        Columns: OLD line number, NEW line number, marker (+ added, - deleted, space unchanged), code.
+
+        """
+        for line in selected where line.kind != .noNewline {
+            prompt += ReviewPrompt.renderLine(line) + "\n"
+        }
+        prompt += "\n# Question\n\n\(question.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+
+        let fileDiff = ReviewPrompt.render(file)
+        if fileDiff.count <= maxFileDiffCharacters {
+            prompt += "\n# The whole diff of this file, for context\n" + fileDiff
+        } else {
+            prompt += "\n# Context\n\nThe file's diff is large; inspect it with `\(context.diffCommand(for: file.path))` if needed.\n"
+        }
+        return prompt
     }
 }
 
@@ -125,14 +167,16 @@ public final class ClaudeReviewRun: @unchecked Sendable {
     private let command: String
     private let directory: URL
     private let prompt: String
+    private let schema: String
     private let lock = NSLock()
     private var process: Process?
     private var cancelled = false
 
-    public init(command: String, directory: URL, prompt: String) {
+    public init(command: String, directory: URL, prompt: String, schema: String = ReviewSchema.json) {
         self.command = command
         self.directory = directory
         self.prompt = prompt
+        self.schema = schema
     }
 
     /// Arguments appended to the user's command. Read-only tools; Bash limited to git
@@ -144,8 +188,13 @@ public final class ClaudeReviewRun: @unchecked Sendable {
     --strict-mcp-config --disable-slash-commands --no-session-persistence
     """
 
-    /// Blocking; call off the main thread.
-    public func run() throws -> ClaudeResult {
+    /// Runs a review. Blocking; call off the main thread.
+    public func run() throws -> ClaudeResult { try execute(ClaudeOutput.parse) }
+
+    /// Runs a question (create the run with `AnswerSchema.json`). Blocking.
+    public func runAnswer() throws -> ClaudeAnswer { try execute(ClaudeOutput.parseAnswer) }
+
+    private func execute<T>(_ parse: (Data) throws -> T) throws -> T {
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
@@ -153,7 +202,7 @@ public final class ClaudeReviewRun: @unchecked Sendable {
         process.arguments = ["-l", "-i", "-c", "\(command) \(Self.arguments)"]
         process.currentDirectoryURL = directory
         var env = ProcessInfo.processInfo.environment
-        env["OPDIFF_REVIEW_SCHEMA"] = ReviewSchema.json
+        env["OPDIFF_REVIEW_SCHEMA"] = schema
         process.environment = env
 
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
@@ -192,7 +241,7 @@ public final class ClaudeReviewRun: @unchecked Sendable {
         if wasCancelled { throw CancellationError() }
 
         do {
-            return try ClaudeOutput.parse(output)
+            return try parse(output)
         } catch {
             // Prefer the CLI's own error message (e.g. command not found, not logged in).
             let errText = String(decoding: errBuffer.data, as: UTF8.self)
