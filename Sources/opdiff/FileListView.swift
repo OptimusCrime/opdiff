@@ -131,7 +131,9 @@ private struct TreeNodeView: View {
                 .help(String(node.id.dropFirst(4)))
             }
         } else if let file = node.file {
-            FileRow(file: file, name: node.name, viewed: model.isViewed(file))
+            let annotations = model.annotations(for: file)
+            FileRow(file: file, name: node.name, viewed: model.isViewed(file),
+                    annotationCount: annotations.count, strongestAnnotation: annotations.map(\.kind).max())
                 .tag(file.id)
         }
     }
@@ -149,6 +151,8 @@ private struct FileRow: View {
     let file: FileDiff
     let name: String
     let viewed: Bool
+    var annotationCount = 0
+    var strongestAnnotation: AnnotationKind?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -157,6 +161,9 @@ private struct FileRow: View {
                 .foregroundStyle(viewed ? .secondary : .primary)
                 .layoutPriority(1)
             Spacer(minLength: 4)
+            if let strongestAnnotation {
+                AnnotationBadge(count: annotationCount, kind: strongestAnnotation)
+            }
             if viewed {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
             }

@@ -5,6 +5,8 @@ struct ContentView: View {
     @Bindable var model: CompareModel
     @State private var selection: String?
     @State private var filter = ""
+    @State private var showReview = false
+    @State private var jumpRequest: JumpRequest?
     @AppStorage("splitView") private var splitView = false
 
     var body: some View {
@@ -19,9 +21,19 @@ struct ContentView: View {
                         .searchable(text: $filter, placement: .sidebar, prompt: "Filter files")
                         .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 520)
                 } detail: {
-                    DiffListView(model: model, selection: $selection, splitView: splitView)
+                    DiffListView(model: model, selection: $selection, splitView: splitView,
+                                 jumpRequest: jumpRequest) {
+                        showReview = true
+                    }
+                }
+                .inspector(isPresented: $showReview) {
+                    ReviewInspector(model: model) { annotation in jumpRequest = JumpRequest(annotation: annotation) }
+                        .inspectorColumnWidth(min: 280, ideal: 360, max: 560)
                 }
                 .toolbar { toolbar }
+                // Show the review panel when a review starts or a new one arrives.
+                .onChange(of: model.isReviewing) { _, running in if running { showReview = true } }
+                .onChange(of: model.storedReview?.createdAt) { _, date in if date != nil { showReview = true } }
             }
         }
         .navigationTitle(model.repo?.lastPathComponent ?? "OptimusDiff")
@@ -73,6 +85,7 @@ struct ContentView: View {
                 .help(model.canIncludeUncommitted
                       ? "Include staged, unstaged and untracked changes in the working tree"
                       : "Only available when 'compare' is the checked-out branch (\(model.currentBranch ?? "none"))")
+            AskClaudeButton(model: model)
             Picker("Layout", selection: $splitView) {
                 Image(systemName: "rectangle").help("Unified").tag(false)
                 Image(systemName: "rectangle.split.2x1").help("Split").tag(true)
@@ -81,6 +94,10 @@ struct ContentView: View {
             .help("Unified or split view")
             Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }
                 .help("Refresh (⌘R)")
+            Button { showReview.toggle() } label: {
+                Label("Claude Review", systemImage: "sidebar.right")
+            }
+            .help(showReview ? "Hide the Claude review panel" : "Show the Claude review panel")
         }
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import DiffCore
 import SwiftUI
 
@@ -72,6 +73,24 @@ final class CompareModel {
     /// Branch selection to restore when leaving commits mode.
     private var savedBranchSelection: (base: String, head: String)?
 
+    // Claude review
+    private(set) var reviewStatus: ReviewStatus = .idle
+    private(set) var storedReview: StoredReview?
+    /// Stable hash of the current diff; a saved review is outdated when it doesn't match.
+    private(set) var diffFingerprint = ""
+    private(set) var annotationLayouts: [String: AnnotationLayout] = [:]
+    /// Annotations grouped by the diff file they resolve to (see AnnotationFileResolver).
+    private(set) var annotationsByFile: [String: [Annotation]] = [:]
+    /// Annotation id → file id, for jumping to a comment.
+    private(set) var annotationFileIDs: [String: String] = [:]
+    /// Briefly highlighted after jumping to it.
+    private(set) var flashedAnnotationID: String?
+    private(set) var recentClaudeCommands: [String] = UserDefaults.standard.stringArray(forKey: "claudeCommands") ?? []
+    /// What the running review is about, e.g. "main...feature via pclaude".
+    private(set) var reviewTarget: String?
+    private var reviewRun: ClaudeReviewRun?
+    private var reviewLoadedKey: String?
+
     private var reloadToken = 0
     private var launch: LaunchOptions?
 
@@ -128,7 +147,11 @@ final class CompareModel {
     }
 
     func loadDiff() async {
-        guard let repo, !base.isEmpty, !head.isEmpty else { files = []; commits = []; mergeBase = nil; return }
+        guard let repo, !base.isEmpty, !head.isEmpty else {
+            files = []; commits = []; mergeBase = nil
+            refreshReviewForCurrentDiff()
+            return
+        }
         let (base, head, uncommitted) = (base, head, effectiveUncommitted)
         isLoading = true
         do {
@@ -145,6 +168,7 @@ final class CompareModel {
             files = []; commits = []; mergeBase = nil
             errorMessage = error.localizedDescription
         }
+        refreshReviewForCurrentDiff()
         isLoading = false
     }
 
@@ -299,4 +323,177 @@ final class CompareModel {
     func expandAll() { collapsed = [] }
 
     func fileURL(_ f: FileDiff) -> URL? { repo?.appendingPathComponent(f.path) }
+
+    // MARK: Claude review
+
+    enum ReviewStatus: Equatable {
+        case idle
+        case running(since: Date)
+        case failed(String)
+    }
+
+    struct StoredReview: Codable {
+        var review: Review
+        var fingerprint: String
+        var createdAt: Date
+        var command: String
+        var focus: String
+        var costUSD: Double?
+    }
+
+    var isReviewing: Bool { if case .running = reviewStatus { true } else { false } }
+    var reviewIsOutdated: Bool { storedReview.map { $0.fingerprint != diffFingerprint } ?? false }
+
+    /// Identifies what was compared, so a review is saved and restored per comparison.
+    private var reviewKey: String { "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)" }
+
+    func annotations(for file: FileDiff) -> [Annotation] { annotationsByFile[file.id] ?? [] }
+
+    func fileID(for annotation: Annotation) -> String? { annotationFileIDs[annotation.id] }
+
+    /// Make sure a file's rows are rendered before scrolling into it.
+    func revealForJump(_ fileID: String) {
+        collapsed.remove(fileID)
+        expandedLarge.insert(fileID)
+    }
+
+    func flash(_ annotation: Annotation) {
+        flashedAnnotationID = annotation.id
+        let id = annotation.id
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            if flashedAnnotationID == id { flashedAnnotationID = nil }
+        }
+    }
+
+    func annotationLayout(for file: FileDiff) -> AnnotationLayout? { annotationLayouts[file.id] }
+
+    func startReview(command rawCommand: String, focus: String) {
+        let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let repo, !files.isEmpty, !command.isEmpty, reviewRun == nil else { return }
+        rememberClaudeCommand(command)
+
+        let context = ReviewContext(base: base, head: head, mergeBase: mergeBase,
+                                    includesWorkingTree: effectiveUncommitted,
+                                    commitCount: commits.count, focus: focus)
+        let prompt = ReviewPrompt.build(files: files, context: context)
+        let run = ClaudeReviewRun(command: command, directory: repo, prompt: prompt)
+        let key = reviewKey, fingerprint = diffFingerprint
+        reviewRun = run
+        reviewTarget = "\(displayName(base))...\(displayName(head)) via \(command)"
+        reviewStatus = .running(since: Date())
+
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) { try run.run() }.value
+                let stored = StoredReview(review: result.review, fingerprint: fingerprint, createdAt: Date(),
+                                          command: command, focus: focus, costUSD: result.costUSD)
+                Self.saveReview(stored, key: key)
+                guard reviewRun === run else { return }
+                reviewRun = nil
+                reviewStatus = .idle
+                if reviewKey == key {  // still looking at the same comparison
+                    storedReview = stored
+                    reviewLoadedKey = key
+                    rebuildAnnotationLayouts()
+                }
+            } catch {
+                guard reviewRun === run else { return }
+                reviewRun = nil
+                reviewStatus = error is CancellationError ? .idle : .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func cancelReview() {
+        reviewRun?.cancel()
+        reviewRun = nil
+        reviewStatus = .idle
+    }
+
+    func dismissReviewError() {
+        if case .failed = reviewStatus { reviewStatus = .idle }
+    }
+
+    func clearReview() {
+        storedReview = nil
+        Self.deleteReview(key: reviewKey)
+        rebuildAnnotationLayouts()
+    }
+
+    private func rememberClaudeCommand(_ command: String) {
+        recentClaudeCommands.removeAll { $0 == command }
+        recentClaudeCommands.insert(command, at: 0)
+        recentClaudeCommands = Array(recentClaudeCommands.prefix(6))
+        UserDefaults.standard.set(recentClaudeCommands, forKey: "claudeCommands")
+    }
+
+    /// After every diff load: update the fingerprint and show the saved review for this comparison.
+    private func refreshReviewForCurrentDiff() {
+        diffFingerprint = Self.fingerprint(files)
+        let key = reviewKey
+        if reviewLoadedKey != key {
+            reviewLoadedKey = key
+            storedReview = (repo == nil || base.isEmpty || head.isEmpty) ? nil : Self.loadReview(key: key)
+        }
+        rebuildAnnotationLayouts()
+    }
+
+    private func rebuildAnnotationLayouts() {
+        var byFile: [String: [Annotation]] = [:]
+        var fileIDs: [String: String] = [:]
+        for annotation in storedReview?.review.annotations ?? [] {
+            guard let file = AnnotationFileResolver.resolve(annotation.file, in: files) else { continue }
+            byFile[file.id, default: []].append(annotation)
+            fileIDs[annotation.id] = file.id
+        }
+        var layouts: [String: AnnotationLayout] = [:]
+        for file in files {
+            if let annotations = byFile[file.id] {
+                layouts[file.id] = AnnotationLayout(file: file, annotations: annotations)
+            }
+        }
+        annotationsByFile = byFile
+        annotationFileIDs = fileIDs
+        annotationLayouts = layouts
+    }
+
+    private static func fingerprint(_ files: [FileDiff]) -> String {
+        var hasher = SHA256()
+        for file in files {
+            hasher.update(data: Data("\u{1}\(file.path)\n".utf8))
+            for line in file.hunks.flatMap(\.lines) {
+                hasher.update(data: Data("\(line.kind)\(line.text)\n".utf8))
+            }
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func reviewURL(key: String) -> URL {
+        let name = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return URL.applicationSupportDirectory
+            .appendingPathComponent("OptimusDiff/reviews", isDirectory: true)
+            .appendingPathComponent(name + ".json")
+    }
+
+    private static func loadReview(key: String) -> StoredReview? {
+        guard let data = try? Data(contentsOf: reviewURL(key: key)) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(StoredReview.self, from: data)
+    }
+
+    private static func saveReview(_ review: StoredReview, key: String) {
+        let url = reviewURL(key: key)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(review) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func deleteReview(key: String) {
+        try? FileManager.default.removeItem(at: reviewURL(key: key))
+    }
 }

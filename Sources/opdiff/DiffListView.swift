@@ -20,13 +20,16 @@ struct DiffListView: View {
     let model: CompareModel
     @Binding var selection: String?
     let splitView: Bool
+    let jumpRequest: JumpRequest?
+    let onOpenReview: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                    SummaryHeader(model: model).padding(.bottom, 16)
+                    SummaryHeader(model: model, onOpenReview: onOpenReview)
+                        .padding(.bottom, 16)
                     ForEach(model.files) { file in
                         Section {
                             fileBody(file)
@@ -49,8 +52,37 @@ struct DiffListView: View {
             .onChange(of: selection) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
             }
+            .onChange(of: jumpRequest) { _, request in
+                if let request { jump(to: request.annotation, proxy: proxy) }
+            }
         }
     }
+
+    /// Scroll to the row that holds an annotation's card.
+    ///
+    /// The diff is a LazyVStack, so rows far away haven't been laid out and their heights
+    /// are estimates: a single scrollTo can land off target. Scroll to the file first, then
+    /// to the row, and once more after layout has settled.
+    private func jump(to annotation: Annotation, proxy: ScrollViewProxy) {
+        guard let fileID = model.fileID(for: annotation),
+              let file = model.files.first(where: { $0.id == fileID }) else { return }
+        model.revealForJump(fileID)
+        let rows = splitView ? file.splitRows : file.unifiedRows
+        let rowID = model.annotationLayout(for: file)?.rowIndex(of: annotation, in: rows).map { Self.rowID(fileID, $0) }
+        // Below the sticky file header rather than underneath it.
+        let anchor = UnitPoint(x: 0, y: 0.25)
+        proxy.scrollTo(fileID, anchor: .top)
+        model.flash(annotation)
+        guard let rowID else { return }  // comment not on a changed line: the file header is the target
+        Task { @MainActor in
+            for delay in [80, 220, 400] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                proxy.scrollTo(rowID, anchor: anchor)
+            }
+        }
+    }
+
+    static func rowID(_ fileID: String, _ index: Int) -> String { "\(fileID)#row\(index)" }
 
     private func highlightTaskID(_ file: FileDiff) -> String {
         "\(file.id)#\(file.contentHash)#\(colorScheme == .dark)#\(model.isCollapsed(file))#\(model.isLargeHidden(file))"
@@ -69,8 +101,17 @@ struct DiffListView: View {
                 let rows = splitView ? file.splitRows : file.unifiedRows
                 let gutter = CGFloat(max(String(file.maxLineNumber).count, 2)) * 7.5
                 let highlight = model.highlighted(file, dark: colorScheme == .dark)
+                let layout = model.annotationLayout(for: file)
+                let flashed = model.flashedAnnotationID
+                ForEach(layout?.unplaced ?? []) { annotation in
+                    AnnotationCard(annotation: annotation, note: "not on a changed line",
+                                   isFlashing: annotation.id == flashed)
+                        .cardSides()
+                }
                 ForEach(rows.indices, id: \.self) { i in
-                    RowView(row: rows[i], gutter: gutter, highlight: highlight).cardSides()
+                    RowView(row: rows[i], gutter: gutter, highlight: highlight, layout: layout, flashedID: flashed)
+                        .cardSides()
+                        .id(Self.rowID(file.id, i))
                 }
             }
         }
@@ -80,6 +121,7 @@ struct DiffListView: View {
 
 private struct SummaryHeader: View {
     let model: CompareModel
+    let onOpenReview: () -> Void
     @State private var showCommits = false
 
     var body: some View {
@@ -132,6 +174,8 @@ private struct SummaryHeader: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
             }
+            ReviewPanel(model: model, onOpenReview: onOpenReview)
+                .padding(.top, 4)
         }
         .textSelection(.disabled)
     }
@@ -177,6 +221,10 @@ private struct FileHeader: View {
             Text(file.path).fontWeight(.semibold)
             DiffStat(additions: file.additions, deletions: file.deletions)
                 .font(.caption.monospacedDigit())
+            let annotations = model.annotations(for: file)
+            if let strongest = annotations.map(\.kind).max() {
+                AnnotationBadge(count: annotations.count, kind: strongest)
+            }
             Spacer()
             Toggle("Viewed", isOn: Binding(get: { model.isViewed(file) }, set: { model.setViewed(file, $0) }))
                 .toggleStyle(.checkbox)
@@ -224,8 +272,31 @@ private struct RowView: View {
     let row: DiffRow
     let gutter: CGFloat
     let highlight: HighlightedFile?
+    let layout: AnnotationLayout?
+    let flashedID: String?
 
     var body: some View {
+        VStack(spacing: 0) {
+            content
+            ForEach(cards) { AnnotationCard(annotation: $0, isFlashing: $0.id == flashedID) }
+        }
+    }
+
+    /// Comments shown under this row (once per annotation, even if both sides match).
+    private var cards: [Annotation] {
+        guard let layout else { return [] }
+        var lines: [DiffLine] = []
+        switch row {
+        case .hunk: return []
+        case .line(let line): lines = [line]
+        case .pair(let old, let new): lines = [old, new].compactMap { $0 }
+        }
+        var seen = Set<String>()
+        return lines.flatMap { layout.cards(after: $0) }.filter { seen.insert($0.id).inserted }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch row {
         case .hunk(let header):
             Text(header)
@@ -236,13 +307,16 @@ private struct RowView: View {
                 .background(Palette.hunk)
         case .line(let line):
             UnifiedLine(line: line, gutter: gutter, highlighted: highlight?.text(for: line))
+                .modifier(AnnotationMarker(kind: layout?.marker(for: line)))
         case .pair(let old, let new):
             HStack(spacing: 0) {
                 SplitCell(line: old, number: old?.oldNumber, gutter: gutter,
                           highlighted: old.flatMap { highlight?.old[$0.oldNumber ?? -1] })
+                    .modifier(AnnotationMarker(kind: old.flatMap { layout?.markers[.old]?[$0.oldNumber ?? -1] }))
                 Rectangle().fill(Palette.border).frame(width: 1)
                 SplitCell(line: new, number: new?.newNumber, gutter: gutter,
                           highlighted: new.flatMap { highlight?.new[$0.newNumber ?? -1] })
+                    .modifier(AnnotationMarker(kind: new.flatMap { layout?.markers[.new]?[$0.newNumber ?? -1] }))
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -357,7 +431,7 @@ private extension LineKind {
     }
 }
 
-private extension View {
+extension View {
     /// Left/right borders so consecutive rows read as one card per file.
     func cardSides() -> some View {
         overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 1) }
