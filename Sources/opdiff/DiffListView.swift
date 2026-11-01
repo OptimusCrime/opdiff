@@ -89,8 +89,16 @@ private struct SummaryHeader: View {
                 if model.isLoading { ProgressView().controlSize(.small) }
             }
             if !model.base.isEmpty, !model.head.isEmpty {
-                Text("Changes on \(Text(model.head).bold()) since it diverged from \(Text(model.base).bold())\(model.effectiveUncommitted ? ", including uncommitted work" : "").")
-                    .foregroundStyle(.secondary)
+                let base = Text(model.displayName(model.base)).bold()
+                let head = Text(model.displayName(model.head)).bold()
+                let extra = model.effectiveUncommitted ? ", including uncommitted work" : ""
+                if model.mode == .branches {
+                    Text("Changes on \(head) since it diverged from \(base)\(extra).")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Changes from \(base) to \(head)\(extra).")
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack(spacing: 16) {
                 Button { showCommits.toggle() } label: {
@@ -112,6 +120,10 @@ private struct SummaryHeader: View {
             } else if model.files.isEmpty, !model.isLoading {
                 Text(model.branches.isEmpty
                      ? "This repository has no commits yet — commit something first, then compare branches."
+                     : model.mode == .commits && model.base.isEmpty
+                     ? "Select a base commit, then the commit to compare it with."
+                     : model.mode == .commits && model.head.isEmpty
+                     ? "There are no commits after the base commit on \(model.commitBranch)."
                      : model.base.isEmpty || model.head.isEmpty
                      ? "Select a base and a compare branch."
                      : model.base == model.head && !model.effectiveUncommitted

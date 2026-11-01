@@ -5,6 +5,7 @@
 A small native macOS app for reviewing the diff between two branches before opening a pull request — like GitHub's "Comparing changes" page, but local.
 
 - Pick **base** and **compare** branches (searchable; you can also type any ref: tag, SHA, `HEAD~3`)
+- Or switch to **Commits** mode to compare two commits on one branch: pick the base commit first, then the compare picker lists only the commits after it
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
 - All changed files in one scroll with sticky headers, plus a collapsible folder tree
 - Unified or split view, "Viewed" checkboxes, commit list, renames/binary/new/deleted files
@@ -29,6 +30,7 @@ opdiff                 # current branch vs. default base (origin/HEAD, else main
 opdiff main            # current branch vs. main
 opdiff main feature/x  # feature/x vs. main
 opdiff -c              # committed changes only
+opdiff <sha1> <sha2>   # changes between two commits (opens in Commits mode)
 ```
 
 `git opdiff …` works too (installed as a `git-opdiff` link; git runs any `git-<name>` on your PATH as `git <name>`).
