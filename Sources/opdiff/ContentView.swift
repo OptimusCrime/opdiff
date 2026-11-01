@@ -24,7 +24,7 @@ struct ContentView: View {
                 .toolbar { toolbar }
             }
         }
-        .navigationTitle(model.repo?.lastPathComponent ?? "opdiff")
+        .navigationTitle(model.repo?.lastPathComponent ?? "OptimusDiff")
         .navigationSubtitle(model.base.isEmpty || model.head.isEmpty ? "" : "\(model.displayName(model.base))...\(model.displayName(model.head))")
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
@@ -282,7 +282,7 @@ struct WelcomeView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 52, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("opdiff").font(.largeTitle.bold().monospaced())
+            Text("OptimusDiff").font(.largeTitle.bold())
             Text("Review every change between two branches before you open a pull request.")
                 .foregroundStyle(.secondary)
             Button("Open Repository…") { model.chooseRepository() }

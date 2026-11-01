@@ -7,7 +7,7 @@ struct OpdiffApp: App {
     @State private var model = CompareModel(launch: .parse(CommandLine.arguments))
 
     var body: some Scene {
-        Window("opdiff", id: "main") {
+        Window("OptimusDiff", id: "main") {
             ContentView(model: model)
                 .frame(minWidth: 900, minHeight: 600)
         }

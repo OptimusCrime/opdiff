@@ -1,6 +1,8 @@
-# opdiff
+# OptimusDiff
 
-*opdiff* — short for Optimus diff.
+<img src="Resources/AppIcon.png" width="96" alt="OptimusDiff icon">
+
+OptimusDiff (`opdiff` on the command line).
 
 A small native macOS app for reviewing the diff between two branches before opening a pull request — like GitHub's "Comparing changes" page, but local.
 
@@ -17,7 +19,7 @@ Requires macOS 14+ and Xcode / Command Line Tools.
 ## Install
 
 ```sh
-make install            # builds opdiff.app → ~/Applications, the opdiff command → ~/.local/bin
+make install            # builds OptimusDiff.app → ~/Applications, the opdiff command → ~/.local/bin
 make install PREFIX=/usr/local/bin   # if ~/.local/bin isn't on your PATH
 ```
 
@@ -35,7 +37,7 @@ opdiff <sha1> <sha2>   # changes between two commits (opens in Commits mode)
 
 `git opdiff …` works too (installed as a `git-opdiff` link; git runs any `git-<name>` on your PATH as `git <name>`).
 
-Claude Code (or any agent) can open it the same way — e.g. ask *"open the diff against main in opdiff"* and it will run `opdiff main`.
+Claude Code (or any agent) can open it the same way — e.g. ask *"open the diff against main in OptimusDiff"* and it will run `opdiff main`.
 
 You can also launch the app directly and use **File → Open Repository… (⌘O)**, drop a folder on the window, or pick a recent repo. **⌘R** refreshes, **⇧⌘S** swaps base/compare.
 
@@ -52,6 +54,7 @@ You can also launch the app directly and use **File → Open Repository… (⌘O
 ```sh
 swift run opdiff         # run from source (uses the current directory if it's a repo)
 make test                  # parser + git integration tests
+make icon                  # regenerate Resources/AppIcon.icns from scripts/make-icon.swift
 ```
 
 - `Sources/DiffCore` — git invocation and unified-diff parsing (no UI, tested)

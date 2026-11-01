@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opdiff — open the opdiff app for the current repository.
+# opdiff — open OptimusDiff for the current repository.
 #
 #   opdiff                     compare current branch against the default base (origin/HEAD, main, …)
 #   opdiff <base>              compare current branch against <base>
@@ -28,12 +28,12 @@ if [ "${#positional[@]}" -ge 2 ]; then args+=(--head "${positional[1]}"); fi
 
 app="${OPDIFF_APP:-}"
 if [ -z "$app" ]; then
-  for candidate in "$HOME/Applications/opdiff.app" "/Applications/opdiff.app"; do
+  for candidate in "$HOME/Applications/OptimusDiff.app" "/Applications/OptimusDiff.app"; do
     if [ -d "$candidate" ]; then app="$candidate"; break; fi
   done
 fi
 if [ -z "$app" ]; then
-  echo "opdiff: opdiff.app not found. Run 'make install' in the opdiff repo, or set OPDIFF_APP." >&2
+  echo "opdiff: OptimusDiff.app not found. Run 'make install' in the opdiff repo, or set OPDIFF_APP." >&2
   exit 1
 fi
 
