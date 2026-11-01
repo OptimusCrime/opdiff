@@ -318,6 +318,10 @@ struct ReviewInspector: View {
                         let fileAnnotations = byFile[file]!.sorted { $0.startLine < $1.startLine }
                         let inDiff = model.fileID(for: fileAnnotations[0]) != nil
                         VStack(alignment: .leading, spacing: 6) {
+                            if !inDiff {
+                                Text("This file isn't part of the current diff.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             Button { onJump(fileAnnotations[0]) } label: {
                                 Label(file, systemImage: "doc.text")
                                     .font(.callout.monospaced().weight(.semibold))
@@ -326,10 +330,13 @@ struct ReviewInspector: View {
                             .buttonStyle(.link)
                             .disabled(!inDiff)
                             .help(inDiff ? "Jump to \(file)" : "This file isn't part of the current diff")
-                            ForEach(fileAnnotations) { annotation in
+                            // Index-based identity: robust even if two comments are identical.
+                            ForEach(Array(fileAnnotations.enumerated()), id: \.offset) { _, annotation in
                                 Button { onJump(annotation) } label: { commentRow(annotation) }
                                     .buttonStyle(.plain)
                                     .disabled(!inDiff)
+                                    .opacity(inDiff ? 1 : 0.5)
+                                    .help(inDiff ? "Show this comment in the diff" : "This file isn't part of the current diff")
                             }
                         }
                     }
@@ -468,5 +475,34 @@ struct AnnotationMarker: ViewModifier {
                 Rectangle().fill(kind.color).frame(width: 4).padding(.leading, 1)
             }
         }
+    }
+}
+
+/// Draggable divider for the review pane.
+struct PaneDivider: View {
+    @Binding var width: Double
+    @State private var startWidth: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let start = startWidth ?? width
+                                if startWidth == nil { startWidth = width }
+                                width = min(640, max(280, start - value.translation.width))
+                            }
+                            .onEnded { _ in startWidth = nil }
+                    )
+            }
     }
 }

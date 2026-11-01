@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var selection: String?
     @State private var filter = ""
     @State private var showReview = false
+    @AppStorage("reviewPaneWidth") private var reviewPaneWidth = 360.0
     @State private var jumpRequest: JumpRequest?
     @AppStorage("splitView") private var splitView = false
     @AppStorage("wrapLines") private var wrapLines = true
@@ -22,14 +23,21 @@ struct ContentView: View {
                         .searchable(text: $filter, placement: .sidebar, prompt: "Filter files")
                         .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 520)
                 } detail: {
-                    DiffListView(model: model, selection: $selection, splitView: splitView, wrapLines: wrapLines,
-                                 jumpRequest: jumpRequest) {
-                        showReview = true
+                    // A plain side pane rather than `.inspector`: the inspector's ScrollView
+                    // hit-tested its buttons ~one toolbar height above where they were drawn,
+                    // so clicks landed on the wrong comment (or on nothing).
+                    HStack(spacing: 0) {
+                        DiffListView(model: model, selection: $selection, splitView: splitView, wrapLines: wrapLines,
+                                     jumpRequest: jumpRequest) {
+                            showReview = true
+                        }
+                        if showReview {
+                            PaneDivider(width: $reviewPaneWidth)
+                            ReviewInspector(model: model) { annotation in jumpRequest = JumpRequest(annotation: annotation) }
+                                .frame(width: reviewPaneWidth)
+                                .background(Color(nsColor: .windowBackgroundColor))
+                        }
                     }
-                }
-                .inspector(isPresented: $showReview) {
-                    ReviewInspector(model: model) { annotation in jumpRequest = JumpRequest(annotation: annotation) }
-                        .inspectorColumnWidth(min: 280, ideal: 360, max: 560)
                 }
                 .toolbar { toolbar }
                 // Show the review panel when a review starts or a new one arrives.

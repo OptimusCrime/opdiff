@@ -106,10 +106,12 @@ public enum ClaudeOutput {
             throw GitError(message: "Claude's reply didn't match the review format: \(error.localizedDescription)")
         }
         // Re-create annotations so start/end are normalised.
-        let review = Review(summary: decoded.summary, annotations: decoded.annotations.map {
-            Annotation(file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
-                       kind: $0.kind, comment: $0.comment)
-        })
+        var seen = Set<String>()
+        let annotations = decoded.annotations
+            .map { Annotation(file: $0.file, side: $0.side, startLine: $0.startLine, endLine: $0.endLine,
+                              kind: $0.kind, comment: $0.comment) }
+            .filter { seen.insert($0.id).inserted }  // identical duplicates would share an id
+        let review = Review(summary: decoded.summary, annotations: annotations)
         return ClaudeResult(review: review, costUSD: result["total_cost_usd"] as? Double)
     }
 
