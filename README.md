@@ -96,8 +96,20 @@ make icon                # regenerate Resources/AppIcon.icns from scripts/make-i
 
 Code style is defined in `.swift-format` (4-space indent, 120 columns). Run `make format` before committing.
 
-- `Sources/DiffCore` — git invocation, unified-diff parsing, word diffs, search and the Claude review/question prompts (no UI, tested)
+Code layout:
+
+- `Sources/DiffCore` — no UI, unit tested
+  - `Git/` — running git, repository info, comparisons
+  - `Diff/` — diff models, parser, word-level diffs, search, navigation, copying
+  - `Review/` — review/question prompts, running Claude, parsing its output, placing comments on lines
+  - `Support/` — small helpers
 - `Sources/OptimusDiff` — SwiftUI app (built as the `opdiff` binary)
+  - `App/` — app entry point, main window, welcome screen, command-line options
+  - `Model/` — `CompareModel`, the app state; each feature folder adds an extension to it
+  - `Diff/` — the diff list, rows, file tree, syntax highlighting, selection/copying, more context
+  - `Toolbar/` — branch and commit pickers
+  - `Find/`, `Navigation/` (keyboard navigation, open in editor), `Review/`, `Questions/`, `AutoRefresh/`, `Settings/`
+  - `Shared/` — small reusable views and helpers
 - `scripts/` — `.app` bundling script and the `opdiff` command-line launcher
 
 Syntax highlighting is provided by [HighlighterSwift](https://github.com/smittytone/HighlighterSwift) (MIT), which bundles [highlight.js](https://highlightjs.org) (BSD-3-Clause).
