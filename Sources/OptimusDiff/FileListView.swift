@@ -90,7 +90,7 @@ struct FileTreeNode: Identifiable {
 
     private static func nodes(in dir: Dir, prefix: String) -> [FileTreeNode] {
         let folders = dir.dirs.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { key in
-            // Collapse chains of single-child folders into one row, e.g. "Sources/opdiff".
+            // Collapse chains of single-child folders into one row, e.g. "Sources/OptimusDiff".
             var name = key
             var sub = dir.dirs[key]!
             while sub.files.isEmpty, sub.dirs.count == 1, let (childName, child) = sub.dirs.first {

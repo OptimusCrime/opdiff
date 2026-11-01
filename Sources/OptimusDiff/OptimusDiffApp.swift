@@ -3,7 +3,7 @@ import DiffCore
 import SwiftUI
 
 @main
-struct OpdiffApp: App {
+struct OptimusDiffApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = CompareModel(launch: .parse(CommandLine.arguments))
     @AppStorage("wrapLines") private var wrapLines = true
