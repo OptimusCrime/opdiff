@@ -4,9 +4,15 @@
 
 OptimusDiff (`opdiff` on the command line).
 
-A small native macOS app for reviewing the diff between two branches before opening a pull request — like GitHub's "Comparing changes" page, but local. It can also ask [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) to point out the lines that deserve your attention.
+A small native macOS app for reviewing the diff between two branches before opening a pull request, like GitHub's "Comparing changes" page, but local. It can also ask [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) to point out the lines that deserve your attention.
 
 Requires macOS 14+ and Xcode / Command Line Tools.
+
+## Why
+
+OptimusDiff exists to make it as easy as possible to review your own changes before opening a pull request. Run `opdiff` in a repository and you see everything the branch changes (committed, uncommitted and untracked) in one window, the way the pull request will look.
+
+There are plenty of similar tools: git GUIs, IDE diff views, `git difftool` setups and dedicated diff apps. None of them were as quick and simple to use as I wanted. This one is built around my own workflow, but if it fits yours too, feel free to use it.
 
 ## Features
 
@@ -14,7 +20,7 @@ Requires macOS 14+ and Xcode / Command Line Tools.
 - Pick **base** and **compare** branches (searchable; you can also type any ref: tag, SHA, `HEAD~3`)
 - Or switch to **Commits** mode to compare two commits on one branch: pick the base commit first, then the compare picker lists only the commits after it
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
-- **Include uncommitted** (on by default): adds staged, unstaged and untracked work when `compare` is the checked-out branch — useful for reviewing what an AI agent just did before committing
+- **Include uncommitted** (on by default): adds staged, unstaged and untracked work when `compare` is the checked-out branch. Useful for reviewing what an AI agent just did before committing
 - **Refreshes automatically** when files in the repository change or branches move (ignores files in `.gitignore`)
 - **Hide whitespace changes** (`git diff -w`)
 
@@ -59,7 +65,7 @@ opdiff <sha1> <sha2>   # changes between two commits (opens in Commits mode)
 
 `git opdiff …` works too (installed as a `git-opdiff` link; git runs any `git-<name>` on your PATH as `git <name>`).
 
-Claude Code (or any agent) can open it the same way — e.g. ask *"open the diff against main in OptimusDiff"* and it will run `opdiff main`.
+Claude Code (or any agent) can open it the same way. For example, ask *"open the diff against main in OptimusDiff"* and it will run `opdiff main`.
 
 You can also launch the app directly and use **File → Open Repository… (⌘O)**, drop a folder on the window, or pick a recent repo.
 
@@ -98,19 +104,19 @@ Code style is defined in `.swift-format` (4-space indent, 120 columns). Run `mak
 
 Code layout:
 
-- `Sources/DiffCore` — no UI, unit tested
-  - `Git/` — running git, repository info, comparisons
-  - `Diff/` — diff models, parser, word-level diffs, search, navigation, copying
-  - `Review/` — review/question prompts, running Claude, parsing its output, placing comments on lines
-  - `Support/` — small helpers
-- `Sources/OptimusDiff` — SwiftUI app (built as the `opdiff` binary)
-  - `App/` — app entry point, main window, welcome screen, command-line options
-  - `Model/` — `CompareModel`, the app state; each feature folder adds an extension to it
-  - `Diff/` — the diff list, rows, file tree, syntax highlighting, selection/copying, more context
-  - `Toolbar/` — branch and commit pickers
+- `Sources/DiffCore`: no UI, unit tested
+  - `Git/`: running git, repository info, comparisons
+  - `Diff/`: diff models, parser, word-level diffs, search, navigation, copying
+  - `Review/`: review/question prompts, running Claude, parsing its output, placing comments on lines
+  - `Support/`: small helpers
+- `Sources/OptimusDiff`: SwiftUI app (built as the `opdiff` binary)
+  - `App/`: app entry point, main window, welcome screen, command-line options
+  - `Model/`: `CompareModel`, the app state; each feature folder adds an extension to it
+  - `Diff/`: the diff list, rows, file tree, syntax highlighting, selection/copying, more context
+  - `Toolbar/`: branch and commit pickers
   - `Find/`, `Navigation/` (keyboard navigation, open in editor), `Review/`, `Questions/`, `AutoRefresh/`, `Settings/`
-  - `Shared/` — small reusable views and helpers
-- `scripts/` — `.app` bundling script and the `opdiff` command-line launcher
+  - `Shared/`: small reusable views and helpers
+- `scripts/`: `.app` bundling script and the `opdiff` command-line launcher
 
 Syntax highlighting is provided by [HighlighterSwift](https://github.com/smittytone/HighlighterSwift) (MIT), which bundles [highlight.js](https://highlightjs.org) (BSD-3-Clause).
 
