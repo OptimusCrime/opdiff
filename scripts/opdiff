@@ -6,6 +6,7 @@
 #   opdiff <base> <head>       compare <head> against <base>
 #   opdiff -c [base]           committed changes only (uncommitted + untracked
 #                              work is included by default)
+#   opdiff -o                  uncommitted changes only (since the last commit)
 #
 # Also installed as git-opdiff, so `git opdiff ...` works too.
 set -euo pipefail
@@ -15,8 +16,9 @@ positional=()
 for arg in "$@"; do
   case "$arg" in
     -c|--committed-only) args+=(--committed-only) ;;
+    -o|--only-uncommitted) args+=(--only-uncommitted) ;;
     -u|--uncommitted) ;;  # default now; kept for compatibility
-    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) positional+=("$arg") ;;
   esac
 done

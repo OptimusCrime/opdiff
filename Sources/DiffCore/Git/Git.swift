@@ -151,24 +151,46 @@ public enum Git {
         }
 
         let mergeBase = (try? string(["merge-base", base, head], in: repo)).flatMap { $0.isEmpty ? nil : $0 }
-        var diffArgs =
-            ["diff"] + diffFlags + algorithm.arguments + (ignoreWhitespace ? ["-w"] : [])
-            + ["--find-renames", mergeBase ?? base]
-        if !includeWorkingTree { diffArgs.append(head) }
-        diffArgs.append("--")
+        let files = try diff(
+            repo: repo, from: mergeBase ?? base, to: includeWorkingTree ? nil : head,
+            algorithm: algorithm, ignoreWhitespace: ignoreWhitespace)
+        let commits = try log(["\(base)..\(head)"], in: repo)
+        return Comparison(files: files, commits: commits, mergeBase: mergeBase)
+    }
 
-        var files = DiffParser.parse(try run(diffArgs, in: repo))
+    /// Only the work since the last commit: staged, unstaged and untracked changes
+    /// compared with `HEAD`. No commits and no merge base.
+    public static func uncommitted(
+        repo: URL, algorithm: DiffAlgorithm = .gitConfig, ignoreWhitespace: Bool = false
+    ) throws -> Comparison {
+        guard (try? run(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], in: repo)) != nil else {
+            throw GitError(message: "This repository has no commits yet.")
+        }
+        let files = try diff(
+            repo: repo, from: "HEAD", to: nil, algorithm: algorithm, ignoreWhitespace: ignoreWhitespace)
+        return Comparison(files: files, commits: [], mergeBase: nil)
+    }
+
+    /// `from` against `to`, or against the working tree (plus untracked files) when `to` is nil.
+    private static func diff(
+        repo: URL, from: String, to: String?, algorithm: DiffAlgorithm, ignoreWhitespace: Bool
+    ) throws -> [FileDiff] {
+        var args =
+            ["diff"] + diffFlags + algorithm.arguments + (ignoreWhitespace ? ["-w"] : [])
+            + ["--find-renames", from]
+        if let to { args.append(to) }
+        args.append("--")
+
+        var files = DiffParser.parse(try run(args, in: repo))
         if ignoreWhitespace {
             // -w leaves a header without hunks for files whose only changes were whitespace.
             files.removeAll { $0.status == .modified && $0.hunks.isEmpty && !$0.isBinary }
         }
-        if includeWorkingTree {
+        if to == nil {
             files += try untrackedFiles(in: repo)
             files.sort { $0.path < $1.path }
         }
-
-        let commits = try log(["\(base)..\(head)"], in: repo)
-        return Comparison(files: files, commits: commits, mergeBase: mergeBase)
+        return files
     }
 
     /// One file's diff with `context` lines around each change (git's -U), for "show more context".

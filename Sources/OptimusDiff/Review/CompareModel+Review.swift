@@ -26,7 +26,9 @@ extension CompareModel {
     var reviewIsOutdated: Bool { storedReview.map { $0.fingerprint != diffFingerprint } ?? false }
 
     /// Identifies what was compared, so a review is saved and restored per comparison.
-    var reviewKey: String { "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)" }
+    var reviewKey: String {
+        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)\(onlyUncommitted ? "|only" : "")"
+    }
 
     func annotations(for file: FileDiff) -> [Annotation] { annotationsByFile[file.id] ?? [] }
 
@@ -54,7 +56,7 @@ extension CompareModel {
         let context = ReviewContext(
             base: base, head: head, mergeBase: mergeBase,
             includesWorkingTree: effectiveUncommitted,
-            commitCount: commits.count, focus: focus)
+            commitCount: commits.count, focus: focus, uncommittedOnly: onlyUncommitted)
         return ReviewPrompt.build(files: files, context: context)
     }
 
@@ -69,7 +71,7 @@ extension CompareModel {
         let key = reviewKey
         let fingerprint = diffFingerprint
         reviewRun = run
-        reviewTarget = "\(displayName(base))...\(displayName(head)) via \(command)"
+        reviewTarget = "\(comparisonTitle) via \(command)"
         reviewStatus = .running(since: Date())
 
         Task {

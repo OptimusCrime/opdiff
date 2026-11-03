@@ -20,7 +20,8 @@ There are plenty of similar tools: git GUIs, IDE diff views, `git difftool` setu
 - Pick **base** and **compare** branches (searchable; you can also type any ref: tag, SHA, `HEAD~3`)
 - Or switch to **Commits** mode to compare two commits on one branch: pick the base commit first, then the compare picker lists only the commits after it
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
-- **Include uncommitted** (on by default): adds staged, unstaged and untracked work when `compare` is the checked-out branch. Useful for reviewing what an AI agent just did before committing
+- **Committed + uncommitted** (the default): adds staged, unstaged and untracked work when `compare` is the checked-out branch. Useful for reviewing what an AI agent just did before committing
+- **Committed only** or **Uncommitted only**, from the same menu in the toolbar. Uncommitted only shows just the work since the last commit (the working tree against `HEAD`), handy when you're adding to a branch and only want to see what changed since you last committed
 - **Refreshes automatically** when files in the repository change or branches move (ignores files in `.gitignore`)
 - **Hide whitespace changes** (`git diff -w`)
 
@@ -60,6 +61,7 @@ opdiff                 # current branch vs. default base (origin/HEAD, else main
 opdiff main            # current branch vs. main
 opdiff main feature/x  # feature/x vs. main
 opdiff -c              # committed changes only
+opdiff -o              # uncommitted changes only (since the last commit)
 opdiff <sha1> <sha2>   # changes between two commits (opens in Commits mode)
 ```
 

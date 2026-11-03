@@ -55,10 +55,7 @@ struct ContentView: View {
         .background(WindowReader { model.mainWindow = $0 })
         .onAppear(perform: installKeyMonitor)
         .navigationTitle(model.repo?.lastPathComponent ?? "OptimusDiff")
-        .navigationSubtitle(
-            model.base.isEmpty || model.head.isEmpty
-                ? "" : "\(model.displayName(model.base))...\(model.displayName(model.head))"
-        )
+        .navigationSubtitle(model.comparisonTitle)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
             Task { await model.openRepository(url) }
@@ -85,7 +82,10 @@ struct ContentView: View {
             .help("Compare two branches, or two commits on one branch")
 
             if model.mode == .branches {
+                // Uncommitted only compares the working tree with HEAD, so base doesn't apply.
                 BranchPicker(title: "base", selection: $model.base, branches: model.branches)
+                    .disabled(model.onlyUncommitted)
+                    .help(model.onlyUncommitted ? "Not used when showing uncommitted changes only" : "")
                 Image(systemName: "arrow.left").foregroundStyle(.secondary)
                 BranchPicker(title: "compare", selection: $model.head, branches: model.branches)
                 Button {
@@ -93,6 +93,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
+                .disabled(model.onlyUncommitted)
                 .help("Swap base and compare (⇧⌘S)")
             } else {
                 CommitPicker(
@@ -109,19 +110,26 @@ struct ContentView: View {
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            // Shows the effective state: unchecked when it can't apply (e.g. compare is a commit).
-            Toggle(
-                "Include uncommitted",
-                isOn: Binding(
-                    get: { model.effectiveUncommitted },
-                    set: { model.includeUncommitted = $0 })
-            )
-            .toggleStyle(.checkbox)
+            // Shows the effective state: "Committed only" when the working tree can't apply
+            // (e.g. compare is a commit or another branch).
+            Picker(
+                "Changes",
+                selection: Binding(
+                    get: { model.effectiveScope },
+                    set: { model.changeScope = $0 })
+            ) {
+                ForEach(ChangeScope.allCases, id: \.self) { scope in
+                    Text(scope.label).tag(scope)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
             .disabled(!model.canIncludeUncommitted)
             .help(
                 model.canIncludeUncommitted
-                    ? "Include staged, unstaged and untracked changes in the working tree"
-                    : "Only available when 'compare' is the checked-out branch (\(model.currentBranch ?? "none"))")
+                    ? model.effectiveScope.help
+                    : "Uncommitted changes are only available when 'compare' is the checked-out branch "
+                        + "(\(model.currentBranch ?? "none"))")
             AskClaudeButton(model: model)
             Picker("Layout", selection: $model.splitView) {
                 Image(systemName: "rectangle").help("Unified").tag(false)

@@ -124,6 +124,16 @@ final class GitIntegrationTests: XCTestCase {
 
         XCTAssertThrowsError(try Git.compare(repo: dir, base: "nope", head: "feature", includeWorkingTree: false))
 
+        // Only uncommitted: work since the last commit, nothing from the branch's commits.
+        try write("a.txt", "one\nTWO\nthree\n")
+        let only = try Git.uncommitted(repo: dir)
+        XCTAssertEqual(only.files.map(\.path), ["a.txt", "untracked.txt"])
+        XCTAssertEqual(only.files[0].additions, 1)
+        XCTAssertEqual(only.files[0].deletions, 0)
+        XCTAssertTrue(only.commits.isEmpty)
+        XCTAssertNil(only.mergeBase)
+        try git("checkout", "-q", "--", "a.txt")
+
         // Two commits on the same branch: same logic, commit hashes as refs.
         let history = try Git.history(repo: dir, ref: "feature")
         XCTAssertEqual(history.map(\.subject), ["feature work", "initial"])

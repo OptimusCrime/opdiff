@@ -162,7 +162,10 @@ private struct SummaryHeader: View {
                 let base = Text(model.displayName(model.base)).bold()
                 let head = Text(model.displayName(model.head)).bold()
                 let extra = model.effectiveUncommitted ? ", including uncommitted work" : ""
-                if model.mode == .branches {
+                if model.onlyUncommitted {
+                    Text("Uncommitted changes on \(head) since the last commit.")
+                        .foregroundStyle(.secondary)
+                } else if model.mode == .branches {
                     Text("Changes on \(head) since it diverged from \(base)\(extra).")
                         .foregroundStyle(.secondary)
                 } else {
@@ -211,9 +214,11 @@ private struct SummaryHeader: View {
                                 ? "There are no commits after the base commit on \(model.commitBranch)."
                                 : model.base.isEmpty || model.head.isEmpty
                                     ? "Select a base and a compare branch."
-                                    : model.base == model.head && !model.effectiveUncommitted
-                                        ? "Choose different branches to compare."
-                                        : "There isn't anything to compare — the branches are identical."
+                                    : model.onlyUncommitted
+                                        ? "There are no uncommitted changes."
+                                        : model.base == model.head && !model.effectiveUncommitted
+                                            ? "Choose different branches to compare."
+                                            : "There isn't anything to compare — the branches are identical."
                 )
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)

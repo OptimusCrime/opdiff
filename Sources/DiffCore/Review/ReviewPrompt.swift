@@ -6,25 +6,41 @@ public struct ReviewContext: Sendable {
     public var head: String
     public var mergeBase: String?
     public var includesWorkingTree: Bool
+    /// Only the working tree compared with `HEAD` (base and the branch's commits left out).
+    public var uncommittedOnly: Bool
     public var commitCount: Int
     public var focus: String
 
     public init(
         base: String, head: String, mergeBase: String?, includesWorkingTree: Bool,
-        commitCount: Int, focus: String
+        commitCount: Int, focus: String, uncommittedOnly: Bool = false
     ) {
         self.base = base
         self.head = head
         self.mergeBase = mergeBase
         self.includesWorkingTree = includesWorkingTree
+        self.uncommittedOnly = uncommittedOnly
         self.commitCount = commitCount
         self.focus = focus
     }
 
     /// The git command that reproduces the diff for one path.
     func diffCommand(for path: String) -> String {
+        if uncommittedOnly { return "git diff HEAD -- '\(path)'" }
         let from = mergeBase ?? base
         return includesWorkingTree ? "git diff \(from) -- '\(path)'" : "git diff \(from) \(head) -- '\(path)'"
+    }
+
+    /// One sentence fragment describing what is compared.
+    func comparisonDescription(untracked: Bool) -> String {
+        if uncommittedOnly {
+            return "uncommitted changes on `\(head)` since its last commit (staged, unstaged"
+                + (untracked ? " and untracked" : "") + " changes in the working tree compared with HEAD)"
+        }
+        return "changes on `\(head)` since it diverged from `\(base)`"
+            + (mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")
+            + (includesWorkingTree
+                ? ", including uncommitted" + (untracked ? " and untracked" : "") + " changes in the working tree" : "")
     }
 }
 
@@ -37,10 +53,8 @@ public enum ReviewPrompt {
             You are helping a developer review a code change before they open a pull request. \
             Your job is to point their attention at the lines that matter. You will not edit anything.
 
-            Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
-            \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
-            \(context.includesWorkingTree ? ", including uncommitted and untracked changes in the working tree" : "")\
-            . \(context.commitCount) commit(s), \(files.count) file(s) changed.
+            Comparison: \(context.comparisonDescription(untracked: true)). \
+            \(context.uncommittedOnly ? "" : "\(context.commitCount) commit(s), ")\(files.count) file(s) changed.
 
             Return a short `summary` (2–4 sentences: what the change does and the main risks) and a list of \
             `annotations`. Each annotation marks a range of lines in one file:
@@ -140,9 +154,7 @@ public enum QuestionPrompt {
             Answer the question directly and concisely (usually a few short paragraphs at most). \
             Use Markdown for code and emphasis. You will not edit anything.
 
-            Comparison: changes on `\(context.head)` since it diverged from `\(context.base)`\
-            \(context.mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")\
-            \(context.includesWorkingTree ? ", including uncommitted changes in the working tree" : "").
+            Comparison: \(context.comparisonDescription(untracked: false)).
 
             You may use Read/Grep/Glob to look at surrounding code, and `git diff`, `git show`, `git log` for \
             history. Files on disk reflect the current working tree.

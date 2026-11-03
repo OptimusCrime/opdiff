@@ -98,6 +98,15 @@ final class ReviewTests: XCTestCase {
         XCTAssertTrue(prompt.contains("   11       - old"))
         XCTAssertTrue(prompt.contains("         11 + new"))
         XCTAssertTrue(prompt.contains("focus on: error handling"))
+        XCTAssertTrue(prompt.contains("since it diverged from `main` (merge base abc123)"))
+
+        var onlyContext = context
+        onlyContext.uncommittedOnly = true
+        onlyContext.includesWorkingTree = true
+        let only = ReviewPrompt.build(files: files, context: onlyContext)
+        XCTAssertTrue(only.contains("uncommitted changes on `feature` since its last commit"))
+        XCTAssertFalse(only.contains("commit(s)"))
+        XCTAssertEqual(onlyContext.diffCommand(for: "x.swift"), "git diff HEAD -- 'x.swift'")
     }
 
     func testSchemaIsValidJSON() throws {

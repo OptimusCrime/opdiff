@@ -12,7 +12,8 @@ final class CompareModel {
     var base = ""
     var head = ""
     private(set) var mode: CompareMode = .branches
-    var includeUncommitted = true
+    /// What `effectiveScope` uses when compare is the checked-out branch (see ChangeScope.swift).
+    var changeScope: ChangeScope = .all
 
     /// Set only here and in CompareModel+Features (context reloads).
     var files: [FileDiff] = []
@@ -134,14 +135,12 @@ final class CompareModel {
 
     init(launch: LaunchOptions) { self.launch = launch }
 
-    var canIncludeUncommitted: Bool { !head.isEmpty && head == currentBranch }
-    var effectiveUncommitted: Bool { includeUncommitted && canIncludeUncommitted }
     var totalAdditions: Int { files.reduce(0) { $0 + $1.additions } }
     var totalDeletions: Int { files.reduce(0) { $0 + $1.deletions } }
 
     /// The view re-runs `loadDiff()` whenever this changes.
     var compareKey: String {
-        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveUncommitted)|\(diffAlgorithm.rawValue)|\(ignoreWhitespace)|\(reloadToken)"
+        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveScope.rawValue)|\(diffAlgorithm.rawValue)|\(ignoreWhitespace)|\(reloadToken)"
     }
 
     // MARK: Loading
@@ -150,7 +149,7 @@ final class CompareModel {
         guard let options = launch else { return }
         launch = nil
         guard let url = options.repo else { return }
-        includeUncommitted = options.uncommitted
+        changeScope = options.changeScope
         isOpening = true
         await openRepository(url, base: options.base, head: options.head, reportErrors: options.explicitRepo)
         isOpening = false
@@ -200,15 +199,17 @@ final class CompareModel {
             refreshReviewForCurrentDiff()
             return
         }
-        let (base, head, uncommitted, algorithm, ws) = (
-            base, head, effectiveUncommitted, diffAlgorithm, ignoreWhitespace
+        let (base, head, scope, algorithm, ws) = (
+            base, head, effectiveScope, diffAlgorithm, ignoreWhitespace
         )
         isLoading = true
         do {
             let result = try await Task.detached(priority: .userInitiated) {
-                try Git.compare(
-                    repo: repo, base: base, head: head, includeWorkingTree: uncommitted,
-                    algorithm: algorithm, ignoreWhitespace: ws)
+                scope == .uncommitted
+                    ? try Git.uncommitted(repo: repo, algorithm: algorithm, ignoreWhitespace: ws)
+                    : try Git.compare(
+                        repo: repo, base: base, head: head, includeWorkingTree: scope == .all,
+                        algorithm: algorithm, ignoreWhitespace: ws)
             }.value
             guard !Task.isCancelled else { return }
             files = result.files.sorted(by: Self.treeOrder)
@@ -265,7 +266,7 @@ final class CompareModel {
     }
 
     func swap() {
-        guard mode == .branches else { return }  // in commits mode, base must come first
+        guard mode == .branches, !onlyUncommitted else { return }  // in commits mode, base must come first
         (base, head) = (head, base)
     }
 

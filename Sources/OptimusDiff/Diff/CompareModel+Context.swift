@@ -37,7 +37,7 @@ extension CompareModel {
 
     private func reloadWithContext(_ id: String) async {
         guard let repo, let file = file(id: id), let context = contextLines[id] else { return }
-        let from = mergeBase ?? base
+        let from = onlyUncommitted ? "HEAD" : mergeBase ?? base
         let to: String? = effectiveUncommitted ? nil : head
         let (algorithm, ws, path, oldPath) = (diffAlgorithm, ignoreWhitespace, file.path, file.oldPath)
         let result = try? await Task.detached(priority: .userInitiated) {

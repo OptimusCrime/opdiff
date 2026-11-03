@@ -1,12 +1,12 @@
 import Foundation
 
 /// Values passed on the command line, e.g. by `opdiff`:
-///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--committed-only]
+///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--committed-only | --only-uncommitted]
 struct LaunchOptions {
     var repo: URL?
     var base: String?
     var head: String?
-    var uncommitted = true
+    var changeScope = ChangeScope.all
     var explicitRepo = false
 
     static func parse(_ args: [String]) -> LaunchOptions {
@@ -31,8 +31,9 @@ struct LaunchOptions {
                     o.head = v
                     i += 1
                 }
-            case "--uncommitted", "-u": o.uncommitted = true
-            case "--committed-only", "-c": o.uncommitted = false
+            case "--uncommitted", "-u": o.changeScope = .all
+            case "--committed-only", "-c": o.changeScope = .committed
+            case "--only-uncommitted", "-o": o.changeScope = .uncommitted
             default: break
             }
             i += 1
