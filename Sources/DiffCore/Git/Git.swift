@@ -171,6 +171,33 @@ public enum Git {
         return Comparison(files: files, commits: [], mergeBase: nil)
     }
 
+    /// What one commit changed, compared with `parent`: its first parent, or the empty tree
+    /// for a root commit. Lists just that commit, even when it's a merge.
+    public static func singleCommit(
+        repo: URL, commit: String, parent: String, algorithm: DiffAlgorithm = .gitConfig,
+        ignoreWhitespace: Bool = false
+    ) throws -> Comparison {
+        let files = try diff(
+            repo: repo, from: parent, to: commit, algorithm: algorithm, ignoreWhitespace: ignoreWhitespace)
+        return Comparison(files: files, commits: try log(["-n", "1", commit], in: repo), mergeBase: nil)
+    }
+
+    /// The commit `count` first-parent steps behind `ref` (like `ref~count`), for "the last N
+    /// commits". A shorter history stops at the root commit.
+    public static func commitBehind(repo: URL, ref: String, count: Int) throws -> String {
+        if let commit = try? string(["rev-parse", "--verify", "--quiet", "\(ref)~\(count)^{commit}"], in: repo),
+            !commit.isEmpty
+        {
+            return commit
+        }
+        return try string(["rev-list", "--first-parent", "--max-parents=0", ref], in: repo)
+    }
+
+    /// The empty tree's id (it depends on the repository's hash algorithm). Root commits are compared with it.
+    public static func emptyTree(repo: URL) throws -> String {
+        try string(["hash-object", "-t", "tree", "--stdin"], in: repo)
+    }
+
     /// `from` against `to`, or against the working tree (plus untracked files) when `to` is nil.
     private static func diff(
         repo: URL, from: String, to: String?, algorithm: DiffAlgorithm, ignoreWhitespace: Bool
@@ -227,11 +254,13 @@ public enum Git {
     }
 
     static func log(_ revisionArgs: [String], in repo: URL) throws -> [Commit] {
-        let out = try string(["log", "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s"] + revisionArgs + ["--"], in: repo)
+        let out = try string(["log", "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%P%x1f%s"] + revisionArgs + ["--"], in: repo)
         return out.split(separator: "\n").compactMap { line -> Commit? in
-            let f = line.split(separator: "\u{1f}", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 5 else { return nil }
-            return Commit(sha: f[0], hash: f[1], subject: f[4], author: f[2], date: f[3])
+            let f = line.split(separator: "\u{1f}", maxSplits: 5, omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 6 else { return nil }
+            return Commit(
+                sha: f[0], hash: f[1], subject: f[5], author: f[2], date: f[3],
+                parents: f[4].split(separator: " ").map(String.init))
         }
     }
 

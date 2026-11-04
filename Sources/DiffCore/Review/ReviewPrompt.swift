@@ -8,18 +8,22 @@ public struct ReviewContext: Sendable {
     public var includesWorkingTree: Bool
     /// Only the working tree compared with `HEAD` (base and the branch's commits left out).
     public var uncommittedOnly: Bool
+    /// One commit (`head`) compared with `base`, its first parent.
+    public var singleCommit: Bool
     public var commitCount: Int
     public var focus: String
 
     public init(
         base: String, head: String, mergeBase: String?, includesWorkingTree: Bool,
-        commitCount: Int, focus: String, uncommittedOnly: Bool = false
+        commitCount: Int, focus: String, uncommittedOnly: Bool = false,
+        singleCommit: Bool = false
     ) {
         self.base = base
         self.head = head
         self.mergeBase = mergeBase
         self.includesWorkingTree = includesWorkingTree
         self.uncommittedOnly = uncommittedOnly
+        self.singleCommit = singleCommit
         self.commitCount = commitCount
         self.focus = focus
     }
@@ -37,6 +41,7 @@ public struct ReviewContext: Sendable {
             return "uncommitted changes on `\(head)` since its last commit (staged, unstaged"
                 + (untracked ? " and untracked" : "") + " changes in the working tree compared with HEAD)"
         }
+        if singleCommit { return "the changes made by the single commit `\(head)`, compared with `\(base)`" }
         return "changes on `\(head)` since it diverged from `\(base)`"
             + (mergeBase.map { " (merge base \($0.prefix(10)))" } ?? "")
             + (includesWorkingTree

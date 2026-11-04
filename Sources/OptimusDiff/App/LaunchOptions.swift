@@ -1,12 +1,14 @@
 import Foundation
 
 /// Values passed on the command line, e.g. by `opdiff`:
-///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--committed-only | --only-uncommitted]
+///   opdiff --repo <path> [--base <ref>] [--head <ref>] [--committed-only | --uncommitted | --commit [count]]
 struct LaunchOptions {
     var repo: URL?
     var base: String?
     var head: String?
     var changeScope = ChangeScope.all
+    /// Show the last N commits of the current branch instead of comparing branches.
+    var commitCount: Int?
     var explicitRepo = false
 
     static func parse(_ args: [String]) -> LaunchOptions {
@@ -31,9 +33,15 @@ struct LaunchOptions {
                     o.head = v
                     i += 1
                 }
-            case "--uncommitted", "-u": o.changeScope = .all
-            case "--committed-only", "-c": o.changeScope = .committed
-            case "--only-uncommitted", "-o": o.changeScope = .uncommitted
+            case "--committed-only", "-C": o.changeScope = .committed
+            case "--uncommitted", "--only-uncommitted", "-u": o.changeScope = .uncommitted
+            case "--commit", "-c":
+                if let count = value.flatMap({ Int($0) }), count >= 1 {
+                    o.commitCount = count
+                    i += 1
+                } else {
+                    o.commitCount = 1
+                }
             default: break
             }
             i += 1

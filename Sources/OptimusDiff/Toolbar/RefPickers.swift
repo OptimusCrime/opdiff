@@ -79,15 +79,16 @@ struct BranchPicker: View {
 
 /// Searchable commit dropdown for commits mode. The base picker lists the branch's
 /// history (and lets you switch branch); the compare picker lists only commits after base.
+/// In single commit mode there's just one picker, listing the branch's history.
 struct CommitPicker: View {
-    enum Role { case base, compare }
+    enum Role { case base, compare, single }
 
     let title: String
     let selection: String
     let commits: [Commit]
     let model: CompareModel
     let role: Role
-    let onSelect: (String) -> Void
+    let onSelect: (Commit) -> Void
     @State private var isOpen = false
     @State private var query = ""
 
@@ -121,19 +122,21 @@ struct CommitPicker: View {
                 header
                 TextField("Find a commit by message, hash or author", text: $query)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { if let first = matches.first { choose(first.sha) } }
+                    .onSubmit { if let first = matches.first(where: { !isUnselectable($0) }) { choose(first) } }
                 List(matches) { commit in
                     Button {
-                        choose(commit.sha)
+                        choose(commit)
                     } label: {
                         row(commit)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isUnselectable(commit))
+                    .help(isUnselectable(commit) ? "There are no commits after the latest one to compare with it" : "")
                 }
                 .listStyle(.plain)
                 .overlay {
                     if commits.isEmpty {
-                        Text(role == .base ? "No commits on this branch." : "No commits after the base commit.")
+                        Text(role == .compare ? "No commits after the base commit." : "No commits on this branch.")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -146,7 +149,7 @@ struct CommitPicker: View {
     @ViewBuilder
     private var header: some View {
         switch role {
-        case .base:
+        case .base, .single:
             HStack(spacing: 4) {
                 Text("Commits on").foregroundStyle(.secondary)
                 Menu(model.commitBranch) {
@@ -167,6 +170,11 @@ struct CommitPicker: View {
         }
     }
 
+    private func isLatest(_ commit: Commit) -> Bool { commit.sha == model.history.first?.sha }
+
+    /// Nothing comes after the latest commit, so it can't be a base.
+    private func isUnselectable(_ commit: Commit) -> Bool { role == .base && isLatest(commit) }
+
     private func row(_ commit: Commit) -> some View {
         HStack(alignment: .top) {
             Image(systemName: "checkmark").opacity(commit.sha == selection ? 1 : 0)
@@ -179,14 +187,17 @@ struct CommitPicker: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            if commit.sha == model.base { RefTag(text: "base") }
-            if commit.sha == model.head { RefTag(text: "compare") }
+            if isLatest(commit) { RefTag(text: "latest") }
+            if role != .single {
+                if commit.sha == model.base { RefTag(text: "base") }
+                if commit.sha == model.head { RefTag(text: "compare") }
+            }
         }
         .contentShape(Rectangle())
     }
 
-    private func choose(_ sha: String) {
-        onSelect(sha)
+    private func choose(_ commit: Commit) {
+        onSelect(commit)
         isOpen = false
     }
 }

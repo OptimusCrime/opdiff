@@ -2,7 +2,13 @@ import AppKit
 import DiffCore
 import SwiftUI
 
-enum CompareMode: Hashable { case branches, commits }
+enum CompareMode: Hashable {
+    case branches
+    /// A range of commits on one branch.
+    case commits
+    /// One commit on its own. `head` is the commit and `base` its first parent (or the empty tree).
+    case commit
+}
 
 @MainActor @Observable
 final class CompareModel {
@@ -11,7 +17,7 @@ final class CompareModel {
     private(set) var currentBranch: String?
     var base = ""
     var head = ""
-    private(set) var mode: CompareMode = .branches
+    var mode: CompareMode = .branches
     /// What `effectiveScope` uses when compare is the checked-out branch (see ChangeScope.swift).
     var changeScope: ChangeScope = .all
 
@@ -34,14 +40,14 @@ final class CompareModel {
     private(set) var isOpening = false
 
     // Commits mode
-    /// The branch whose history is listed in commits mode.
-    private(set) var commitBranch = ""
+    /// The branch whose history is listed in commits and single commit mode.
+    var commitBranch = ""
     /// Recent commits on `commitBranch` (choices for base), newest first.
-    private(set) var history: [Commit] = []
+    var history: [Commit] = []
     /// Commits after `base` on `commitBranch` (choices for compare), newest first.
-    private(set) var commitsAfterBase: [Commit] = []
+    var commitsAfterBase: [Commit] = []
     /// Branch selection to restore when leaving commits mode.
-    private var savedBranchSelection: (base: String, head: String)?
+    var savedBranchSelection: (base: String, head: String)?
 
     // Claude review
     var reviewStatus: ReviewStatus = .idle
@@ -140,7 +146,7 @@ final class CompareModel {
 
     /// The view re-runs `loadDiff()` whenever this changes.
     var compareKey: String {
-        "\(repo?.path ?? "")|\(base)|\(head)|\(effectiveScope.rawValue)|\(diffAlgorithm.rawValue)|\(ignoreWhitespace)|\(reloadToken)"
+        "\(repo?.path ?? "")|\(mode)|\(base)|\(head)|\(effectiveScope.rawValue)|\(diffAlgorithm.rawValue)|\(ignoreWhitespace)|\(reloadToken)"
     }
 
     // MARK: Loading
@@ -152,6 +158,7 @@ final class CompareModel {
         changeScope = options.changeScope
         isOpening = true
         await openRepository(url, base: options.base, head: options.head, reportErrors: options.explicitRepo)
+        if let count = options.commitCount { await showRecentCommits(count) }
         isOpening = false
     }
 
@@ -199,13 +206,17 @@ final class CompareModel {
             refreshReviewForCurrentDiff()
             return
         }
-        let (base, head, scope, algorithm, ws) = (
-            base, head, effectiveScope, diffAlgorithm, ignoreWhitespace
+        let (base, head, scope, algorithm, ws, single) = (
+            base, head, effectiveScope, diffAlgorithm, ignoreWhitespace, mode == .commit
         )
         isLoading = true
         do {
-            let result = try await Task.detached(priority: .userInitiated) {
-                scope == .uncommitted
+            let result = try await Task.detached(priority: .userInitiated) { () throws -> Comparison in
+                if single {
+                    return try Git.singleCommit(
+                        repo: repo, commit: head, parent: base, algorithm: algorithm, ignoreWhitespace: ws)
+                }
+                return scope == .uncommitted
                     ? try Git.uncommitted(repo: repo, algorithm: algorithm, ignoreWhitespace: ws)
                     : try Git.compare(
                         repo: repo, base: base, head: head, includeWorkingTree: scope == .all,
@@ -257,9 +268,18 @@ final class CompareModel {
                 branches = info.branches
                 currentBranch = info.currentBranch
             }
-            if mode == .commits {  // new commits may exist
+            if mode != .branches {  // new commits may exist
+                let wasLatest = history.first?.sha == head
                 history = await fetchHistory(commitBranch)
-                if !base.isEmpty { commitsAfterBase = await fetchHistory("\(base)..\(commitBranch)") }
+                if mode == .commits, !base.isEmpty {
+                    commitsAfterBase = await fetchHistory("\(base)..\(commitBranch)")
+                }
+                // Follow the branch tip, and don't get stuck on a commit that was amended or rebased away.
+                if mode == .commit, wasLatest || !history.contains(where: { $0.sha == head }),
+                    let latest = history.first
+                {
+                    await selectSingleCommit(latest)
+                }
             }
             reloadToken += 1
         }
@@ -270,7 +290,7 @@ final class CompareModel {
         (base, head) = (head, base)
     }
 
-    // MARK: Refs and commit mode
+    // MARK: Refs
 
     func isBranch(_ ref: String) -> Bool { branches.contains(ref) }
 
@@ -289,50 +309,6 @@ final class CompareModel {
 
     static func looksLikeHash(_ ref: String) -> Bool {
         ref.count >= 7 && ref.allSatisfy(\.isHexDigit)
-    }
-
-    func setMode(_ newMode: CompareMode) async {
-        guard newMode != mode else { return }
-        if newMode == .commits {
-            savedBranchSelection = (base, head)
-            let branch = isBranch(head) ? head : (currentBranch ?? "HEAD")
-            mode = .commits
-            await selectCommitBranch(branch)
-        } else {
-            mode = .branches
-            let saved = savedBranchSelection
-            base = saved?.base ?? ""
-            head = saved?.head ?? currentBranch ?? ""
-            commitsAfterBase = []
-        }
-    }
-
-    /// Commits mode: list another branch's history. Clears the selection.
-    func selectCommitBranch(_ branch: String) async {
-        commitBranch = branch
-        base = ""
-        head = ""
-        commitsAfterBase = []
-        history = []
-        history = await fetchHistory(branch)
-    }
-
-    /// Commits mode: choose the base commit. Compare defaults to the branch's latest
-    /// commit unless the current compare commit is still after the new base.
-    func selectBaseCommit(_ sha: String) async {
-        let after = await fetchHistory("\(sha)..\(commitBranch)")
-        let keepHead = after.contains { $0.sha == head }
-        // Set everything together so only one diff load runs.
-        commitsAfterBase = after
-        base = sha
-        if !keepHead { head = after.first?.sha ?? "" }
-    }
-
-    func selectCompareCommit(_ sha: String) { head = sha }
-
-    private func fetchHistory(_ revision: String) async -> [Commit] {
-        guard let repo else { return [] }
-        return (try? await Task.detached { try Git.history(repo: repo, ref: revision) }.value) ?? []
     }
 
     func chooseRepository() {

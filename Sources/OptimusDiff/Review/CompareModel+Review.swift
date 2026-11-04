@@ -56,7 +56,8 @@ extension CompareModel {
         let context = ReviewContext(
             base: base, head: head, mergeBase: mergeBase,
             includesWorkingTree: effectiveUncommitted,
-            commitCount: commits.count, focus: focus, uncommittedOnly: onlyUncommitted)
+            commitCount: commits.count, focus: focus, uncommittedOnly: onlyUncommitted,
+            singleCommit: mode == .commit)
         return ReviewPrompt.build(files: files, context: context)
     }
 

@@ -144,5 +144,31 @@ final class GitIntegrationTests: XCTestCase {
         // Reversed (base newer than compare): nothing to show, like GitHub.
         let reversed = try Git.compare(repo: dir, base: history[0].sha, head: history[1].sha, includeWorkingTree: false)
         XCTAssertTrue(reversed.files.isEmpty)
+
+        // A single commit, compared with its parent.
+        XCTAssertEqual(history[0].parents, [history[1].sha])
+        let single = try Git.singleCommit(repo: dir, commit: history[0].sha, parent: history[0].parents[0])
+        XCTAssertEqual(single.files.map(\.path), ["a.txt", "b.txt"])
+        XCTAssertEqual(single.commits.map(\.subject), ["feature work"])
+        XCTAssertNil(single.mergeBase)
+
+        // A root commit has no parent: compared with the empty tree.
+        XCTAssertTrue(history[1].parents.isEmpty)
+        let root = try Git.singleCommit(repo: dir, commit: history[1].sha, parent: try Git.emptyTree(repo: dir))
+        XCTAssertEqual(root.files.map(\.path), ["a.txt"])
+        XCTAssertEqual(root.files[0].status, .added)
+
+        // A merge shows what it brought in over its first parent, and only lists itself.
+        try git("merge", "-q", "--no-ff", "-m", "merge main", "main")
+        let merge = try XCTUnwrap(Git.history(repo: dir, ref: "feature").first)
+        XCTAssertTrue(merge.isMerge)
+        let merged = try Git.singleCommit(repo: dir, commit: merge.sha, parent: merge.parents[0])
+        XCTAssertEqual(merged.files.map(\.path), ["c.txt"])
+        XCTAssertEqual(merged.commits.map(\.subject), ["merge main"])
+
+        // The last N commits, along first parents; a shorter history stops at the root.
+        XCTAssertEqual(try Git.commitBehind(repo: dir, ref: "feature", count: 1), merge.parents[0])
+        XCTAssertEqual(try Git.commitBehind(repo: dir, ref: "feature", count: 2), history[1].sha)
+        XCTAssertEqual(try Git.commitBehind(repo: dir, ref: "feature", count: 50), history[1].sha)
     }
 }

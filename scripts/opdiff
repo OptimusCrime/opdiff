@@ -4,24 +4,42 @@
 #   opdiff                     compare current branch against the default base (origin/HEAD, main, …)
 #   opdiff <base>              compare current branch against <base>
 #   opdiff <base> <head>       compare <head> against <base>
-#   opdiff -c [base]           committed changes only (uncommitted + untracked
+#   opdiff -c, --commit [n]    the last n commits of the current branch (default 1,
+#                              just the latest commit, in Single Commit mode)
+#   opdiff -u, --uncommitted   uncommitted changes only (since the last commit)
+#   opdiff -C, --committed-only [base]
+#                              committed changes only (uncommitted + untracked
 #                              work is included by default)
-#   opdiff -o                  uncommitted changes only (since the last commit)
 #
 # Also installed as git-opdiff, so `git opdiff ...` works too.
 set -euo pipefail
 
+die() { echo "opdiff: $1 (see opdiff --help)" >&2; exit 1; }
+
 args=()
 positional=()
-for arg in "$@"; do
-  case "$arg" in
-    -c|--committed-only) args+=(--committed-only) ;;
-    -o|--only-uncommitted) args+=(--only-uncommitted) ;;
-    -u|--uncommitted) ;;  # default now; kept for compatibility
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) positional+=("$arg") ;;
+commit_mode=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -C|--committed-only) args+=(--committed-only) ;;
+    -u|--uncommitted|--only-uncommitted) args+=(--only-uncommitted) ;;
+    -c|--commit)
+      commit_mode=1
+      count=1
+      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then count="$2"; shift; fi
+      [ "$count" -ge 1 ] || die "the number of commits must be at least 1"
+      args+=(--commit "$count")
+      ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) die "unknown option $1" ;;
+    *) positional+=("$1") ;;
   esac
+  shift
 done
+
+if [ -n "$commit_mode" ] && [ "${#positional[@]}" -gt 0 ]; then
+  die "-c shows the current branch's commits and takes no refs (use -C for committed changes only)"
+fi
 
 root="$(git rev-parse --show-toplevel)"
 args+=(--repo "$root")

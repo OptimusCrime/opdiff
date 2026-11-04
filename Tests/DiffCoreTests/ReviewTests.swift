@@ -109,6 +109,14 @@ final class ReviewTests: XCTestCase {
         XCTAssertEqual(onlyContext.diffCommand(for: "x.swift"), "git diff HEAD -- 'x.swift'")
     }
 
+    func testPromptDescribesSingleCommit() {
+        let context = ReviewContext(
+            base: "aaa111", head: "bbb222", mergeBase: nil, includesWorkingTree: false,
+            commitCount: 1, focus: "", singleCommit: true)
+        XCTAssertTrue(context.comparisonDescription(untracked: true).contains("single commit `bbb222`"))
+        XCTAssertEqual(context.diffCommand(for: "x.swift"), "git diff aaa111 bbb222 -- 'x.swift'")
+    }
+
     func testSchemaIsValidJSON() throws {
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(ReviewSchema.json.utf8)))
     }

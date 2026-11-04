@@ -36,10 +36,11 @@ extension CompareModel {
     /// The diff is only the working tree compared with HEAD; base is ignored.
     var onlyUncommitted: Bool { effectiveScope == .uncommitted }
 
-    /// "base...compare", or "compare (uncommitted)".
+    /// "base...compare", "compare (uncommitted)", or the commit in single commit mode.
     var comparisonTitle: String {
         guard !base.isEmpty, !head.isEmpty else { return "" }
         if onlyUncommitted { return "\(displayName(head)) (uncommitted)" }
+        if mode == .commit { return displayName(head) }
         return "\(displayName(base))...\(displayName(head))"
     }
 }

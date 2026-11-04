@@ -8,7 +8,10 @@ public struct Commit: Identifiable, Sendable, Hashable {
     public let subject: String
     public let author: String
     public let date: String
+    /// Full hashes of the parent commits; empty for a root commit.
+    public let parents: [String]
     public var id: String { sha }
+    public var isMerge: Bool { parents.count > 1 }
 }
 
 public struct Comparison: Sendable {

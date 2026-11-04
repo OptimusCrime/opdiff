@@ -152,9 +152,14 @@ extension CompareModel {
         guard let window = event.window, window === mainWindow, window.attachedSheet == nil,
             !(window.firstResponder is NSText),
             event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-            !files.isEmpty,
             let key = event.charactersIgnoringModifiers?.lowercased()
         else { return false }
+        // Stepping works on empty commits too, so this comes before the check for files.
+        if mode == .commit, key == "h" || key == "l" {
+            Task { await key == "h" ? showOlderCommit() : showNewerCommit() }
+            return true
+        }
+        guard !files.isEmpty else { return false }
         switch key {
         case "j": goToChange(forward: true)
         case "k": goToChange(forward: false)

@@ -64,7 +64,7 @@ extension CompareModel {
         let context = ReviewContext(
             base: base, head: head, mergeBase: mergeBase,
             includesWorkingTree: effectiveUncommitted, commitCount: commits.count, focus: "",
-            uncommittedOnly: onlyUncommitted)
+            uncommittedOnly: onlyUncommitted, singleCommit: mode == .commit)
         let prompt = QuestionPrompt.build(file: file, selected: lines, question: question, context: context)
         let run = ClaudeReviewRun(command: command, directory: repo, prompt: prompt, schema: AnswerSchema.json)
         questionRuns[uid] = run

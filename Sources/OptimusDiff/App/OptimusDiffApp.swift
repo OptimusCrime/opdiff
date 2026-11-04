@@ -67,6 +67,11 @@ struct OptimusDiffApp: App {
                 Button("Open in Editor  (O)") { model.openCurrentInEditor() }
                 Button("Ask Claude About Selected Lines…  (A)") { model.beginQuestion() }
                     .disabled(!model.hasLineSelection)
+                Divider()
+                Button("Older Commit  (H)") { Task { await model.showOlderCommit() } }
+                    .disabled(model.olderCommit == nil)
+                Button("Newer Commit  (L)") { Task { await model.showNewerCommit() } }
+                    .disabled(model.newerCommit == nil)
             }
         }
 

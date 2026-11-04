@@ -76,12 +76,14 @@ struct ContentView: View {
             ) {
                 Text("Branches").tag(CompareMode.branches)
                 Text("Commits").tag(CompareMode.commits)
+                Text("Single Commit").tag(CompareMode.commit)
             }
             .pickerStyle(.segmented)
             .fixedSize()
-            .help("Compare two branches, or two commits on one branch")
+            .help("Compare two branches or two commits on one branch, or show what one commit changed")
 
-            if model.mode == .branches {
+            switch model.mode {
+            case .branches:
                 // Uncommitted only compares the working tree with HEAD, so base doesn't apply.
                 BranchPicker(title: "base", selection: $model.base, branches: model.branches)
                     .disabled(model.onlyUncommitted)
@@ -95,18 +97,37 @@ struct ContentView: View {
                 }
                 .disabled(model.onlyUncommitted)
                 .help("Swap base and compare (⇧⌘S)")
-            } else {
+            case .commits:
                 CommitPicker(
                     title: "base", selection: model.base, commits: model.history, model: model,
                     role: .base
-                ) { sha in Task { await model.selectBaseCommit(sha) } }
+                ) { commit in Task { await model.selectBaseCommit(commit.sha) } }
                 Image(systemName: "arrow.left").foregroundStyle(.secondary)
                 CommitPicker(
                     title: "compare", selection: model.head, commits: model.commitsAfterBase, model: model,
                     role: .compare
-                ) { sha in model.selectCompareCommit(sha) }
+                ) { commit in model.selectCompareCommit(commit.sha) }
                 .disabled(model.base.isEmpty)
                 .help(model.base.isEmpty ? "Select a base commit first" : "")
+            case .commit:
+                Button {
+                    Task { await model.showOlderCommit() }
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled(model.olderCommit == nil)
+                .help("Older commit (H)")
+                CommitPicker(
+                    title: "commit", selection: model.head, commits: model.history, model: model,
+                    role: .single
+                ) { commit in Task { await model.selectSingleCommit(commit) } }
+                Button {
+                    Task { await model.showNewerCommit() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(model.newerCommit == nil)
+                .help("Newer commit (L)")
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {

@@ -19,6 +19,7 @@ There are plenty of similar tools: git GUIs, IDE diff views, `git difftool` setu
 **Comparing**
 - Pick **base** and **compare** branches (searchable; you can also type any ref: tag, SHA, `HEAD~3`)
 - Or switch to **Commits** mode to compare two commits on one branch: pick the base commit first, then the compare picker lists only the commits after it
+- Or switch to **Single Commit** mode to see what one commit changed. It opens on the branch's latest commit, and H / L or the arrows step to older and newer commits. You can also click a commit in the commit list to jump to it
 - GitHub semantics: shows what `compare` adds since it diverged from `base` (`base...compare`)
 - **Committed + uncommitted** (the default): adds staged, unstaged and untracked work when `compare` is the checked-out branch. Useful for reviewing what an AI agent just did before committing
 - **Committed only** or **Uncommitted only**, from the same menu in the toolbar. Uncommitted only shows just the work since the last commit (the working tree against `HEAD`), handy when you're adding to a branch and only want to see what changed since you last committed
@@ -60,10 +61,18 @@ From inside any repository:
 opdiff                 # current branch vs. default base (origin/HEAD, else main/master)
 opdiff main            # current branch vs. main
 opdiff main feature/x  # feature/x vs. main
-opdiff -c              # committed changes only
-opdiff -o              # uncommitted changes only (since the last commit)
+opdiff -c              # the last commit (opens in Single Commit mode)
+opdiff -c 5            # the last 5 commits, as one diff (opens in Commits mode)
+opdiff -u              # uncommitted changes only (since the last commit)
+opdiff -C              # committed changes only
 opdiff <sha1> <sha2>   # changes between two commits (opens in Commits mode)
 ```
+
+| Option | Long form | Shows |
+| --- | --- | --- |
+| `-c [n]` | `--commit [n]` | The last `n` commits of the current branch (default 1) |
+| `-u` | `--uncommitted` | Uncommitted changes only, also available as `--only-uncommitted` |
+| `-C` | `--committed-only` | Committed changes only |
 
 `git opdiff …` works too (installed as a `git-opdiff` link; git runs any `git-<name>` on your PATH as `git <name>`).
 
@@ -78,6 +87,7 @@ You can also launch the app directly and use **File → Open Repository… (⌘O
 | J / K | Next / previous change |
 | N / P | Next / previous comment |
 | V | Toggle "Viewed" and go to the next file |
+| H / L | Older / newer commit (Single Commit mode) |
 | O | Open the current line in your editor |
 | A | Ask Claude about the selected lines |
 | ⌘F, ⌘G, ⇧⌘G | Find in diff, next / previous match |

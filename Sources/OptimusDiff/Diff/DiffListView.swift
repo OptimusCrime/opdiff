@@ -165,6 +165,11 @@ private struct SummaryHeader: View {
                 if model.onlyUncommitted {
                     Text("Uncommitted changes on \(head) since the last commit.")
                         .foregroundStyle(.secondary)
+                } else if model.mode == .commit {
+                    let commit = model.commits.first
+                    let merge = commit?.isMerge == true ? " (merge, compared with its first parent)" : ""
+                    Text("Changes in \(head)\(merge): \(commit?.subject ?? "")")
+                        .foregroundStyle(.secondary)
                 } else if model.mode == .branches {
                     Text("Changes on \(head) since it diverged from \(base)\(extra).")
                         .foregroundStyle(.secondary)
@@ -183,7 +188,12 @@ private struct SummaryHeader: View {
                 }
                 .buttonStyle(.link)
                 .disabled(model.commits.isEmpty)
-                .popover(isPresented: $showCommits) { CommitList(commits: model.commits) }
+                .popover(isPresented: $showCommits) {
+                    CommitList(commits: model.commits) { commit in
+                        showCommits = false
+                        Task { await model.showSingleCommit(commit) }
+                    }
+                }
 
                 Label(
                     "\(model.files.count) file\(model.files.count == 1 ? "" : "s") changed", systemImage: "doc.on.doc")
@@ -205,45 +215,60 @@ private struct SummaryHeader: View {
             if let error = model.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
             } else if model.files.isEmpty, !model.isLoading {
-                Text(
-                    model.branches.isEmpty
-                        ? "This repository has no commits yet — commit something first, then compare branches."
-                        : model.mode == .commits && model.base.isEmpty
-                            ? "Select a base commit, then the commit to compare it with."
-                            : model.mode == .commits && model.head.isEmpty
-                                ? "There are no commits after the base commit on \(model.commitBranch)."
-                                : model.base.isEmpty || model.head.isEmpty
-                                    ? "Select a base and a compare branch."
-                                    : model.onlyUncommitted
-                                        ? "There are no uncommitted changes."
-                                        : model.base == model.head && !model.effectiveUncommitted
-                                            ? "Choose different branches to compare."
-                                            : "There isn't anything to compare — the branches are identical."
-                )
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
+                Text(emptyMessage)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
             }
             ReviewPanel(model: model, onOpenReview: onOpenReview)
                 .padding(.top, 4)
         }
         .textSelection(.disabled)
     }
+
+    private var emptyMessage: String {
+        if model.branches.isEmpty {
+            return "This repository has no commits yet — commit something first, then compare branches."
+        }
+        switch model.mode {
+        case .commit:
+            return model.head.isEmpty ? "Select a commit." : "This commit has no changes to show."
+        case .commits where model.base.isEmpty:
+            return "Select a base commit, then the commit to compare it with."
+        case .commits where model.head.isEmpty:
+            return "There are no commits after the base commit on \(model.commitBranch)."
+        default: break
+        }
+        if model.base.isEmpty || model.head.isEmpty { return "Select a base and a compare branch." }
+        if model.onlyUncommitted { return "There are no uncommitted changes." }
+        return model.base == model.head && !model.effectiveUncommitted
+            ? "Choose different branches to compare."
+            : "There isn't anything to compare — the branches are identical."
+    }
 }
 
 private struct CommitList: View {
     let commits: [Commit]
+    let onSelect: (Commit) -> Void
 
     var body: some View {
         List(commits) { c in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(c.subject).lineLimit(2)
-                HStack(spacing: 6) {
-                    Text(c.hash).font(.caption.monospaced())
-                    Text("\(c.author) · \(c.date)").font(.caption)
+            Button {
+                onSelect(c)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.subject).lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(c.hash).font(.caption.monospaced())
+                        Text("\(c.author) · \(c.date)").font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 2)
+            .buttonStyle(.plain)
+            .help("Show only this commit")
         }
         .frame(width: 480, height: 360)
     }
