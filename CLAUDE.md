@@ -9,7 +9,7 @@ Native macOS diff viewer (SwiftUI, Swift Package, macOS 14+). The app target is 
 - `make build`: debug build.
 - `make test`: run the tests.
 - `make check`: lint + build + test. Must pass before committing.
-- `make install`: build `OptimusDiff.app` into `~/Applications` and the `opdiff` launcher into `~/.local/bin`.
+- `make install`: build `OptimusDiff.app` into `/Applications` and the `opdiff` launcher into `~/.local/bin`.
 - `swift run opdiff`: run from source in the current repository.
 
 ## Layout

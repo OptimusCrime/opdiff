@@ -49,7 +49,7 @@ The review runs your `claude` command (or a shell alias for it, set in the Ask C
 ## Install
 
 ```sh
-make install            # builds OptimusDiff.app → ~/Applications, the opdiff command → ~/.local/bin
+make install            # builds OptimusDiff.app → /Applications, the opdiff command → ~/.local/bin
 make install PREFIX=/usr/local/bin   # if ~/.local/bin isn't on your PATH
 ```
 

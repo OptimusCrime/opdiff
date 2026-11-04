@@ -1,5 +1,5 @@
 PREFIX  ?= $(HOME)/.local/bin
-APP_DIR ?= $(HOME)/Applications
+APP_DIR ?= /Applications
 
 .PHONY: app build install uninstall test run icon format lint check
 
